@@ -1,7 +1,7 @@
 {
   "name": "pi-model-auto",
   "version": "0.1.8",
-  "description": "Pi extension package that routes each turn to cheap or strong authenticated models.",
+  "description": "Pi extension package that routes each turn by Low/Medium/High/Ultra capability modes.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -32,6 +32,7 @@
     "src/quota.ts",
     "src/canonical-models.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "pi": {

@@ -10,18 +10,18 @@ import { DEFAULT_QUOTA_CONFIG, filterPoolByQuotaPlanPrefix, QuotaState, type Quo
  * the quality floor, economics choose among qualifying variants, and benchmark effort configures the
  * selected provider call.
  */
-export type Tier = "cheap" | "strong";
-export type RouteClass = Tier | "model";
+export type RouteClass = CapabilityMode | "model";
 export type Confidence = "high" | "medium" | "low";
 /** Which benchmark drives every model's capability + cost. The two are never merged; selection is wholesale. */
 export type CapabilitySource = "aa" | "ramp";
 export type CapabilityMode = "low" | "medium" | "high" | "ultra";
-/** Task hardness, ordered. Sets how far up the capability frontier selection climbs (the willingness budget). */
-export type Hardness = "trivial" | "normal" | "hard" | "max";
-export const HARDNESS_ORDER: Hardness[] = ["trivial", "normal", "hard", "max"];
+/** User-facing capability modes, ordered from least to most capable. */
 const CAPABILITY_MODE_ORDER: CapabilityMode[] = ["low", "medium", "high", "ultra"];
-const HARDNESS_SCORE_BOUNDS: [number, number][] = [[0, 0.3], [0.3, 0.52], [0.52, 0.74], [0.74, 1]];
-const MODE_SOLVE_BOUNDS: [number, number][] = [[0, 75], [75, 80], [80, 85], [85, 100]];
+const MODE_SCORE_BOUNDS: [number, number][] = [[0, 0.3], [0.3, 0.52], [0.52, 0.74], [0.74, 1]];
+/** Ramp capability modes are SWE-bench solve-rate bands. */
+const RAMP_MODE_BOUNDS: [number, number][] = [[0, 75], [75, 80], [80, 85], [85, 100]];
+/** AA capability modes are Intelligence Index bands on the current frontier scale. Low is <= 41. */
+const AA_MODE_BOUNDS: [number, number][] = [[0, 41], [41, 52], [52, 56], [56, 65]];
 
 /** Choose provider reasoning: auto uses its measured model-effort variant; forced models honor Pi. */
 export function routingReasoning(
@@ -134,20 +134,21 @@ export interface RouterConfig {
     toolDensity: number;
   };
   log: boolean;
-  tierModels: Partial<Record<Tier, string>>;
+  /** Pin an exact provider/model for a user-facing capability mode. */
+  modeModels: Partial<Record<CapabilityMode, string>>;
   /** Restrict the automatically built pool by provider/id/name/canonical substring. Empty include means allow all. */
   modelFilter: ModelFilter;
   /** User-supplied metadata for unknown/private/local models. Keys may be provider/id, model id, or normalized model id. */
   modelOverrides: Record<string, ModelOverride>;
   /**
-   * Willingness to pay for capability, by task hardness: the max extra list-price ($/1M) spent for
+   * Willingness to pay for capability, by selected mode: the max extra list-price ($/1M) spent for
    * one more point of quality on the chosen axis. Selection walks the Pareto frontier from the
    * cheapest point upward, taking each step whose marginal $/quality-point is within budget — so the
-   * hardness signal (driven by task content) positions us on the frontier and steep low-value
-   * steps (a near-tie flagship at 2× price) are only taken at `max`. The single routing knob, axis-
-   * agnostic. Raise a row to climb further for that hardness; `max: Infinity` = "top of frontier".
+   * mode signal (driven by task content) positions us on the frontier and steep low-value
+   * steps (a near-tie flagship at 2× price) are only taken at `ultra`. The single routing knob, axis-
+   * agnostic. Raise a row to climb further for that mode; `ultra: Infinity` = "top of frontier".
    */
-  willingness: Record<Hardness, number>;
+  willingness: Record<CapabilityMode, number>;
   /**
    * Cross-turn cache stickiness. Once a model has a warm prompt cache (a "lease"), switching to a
    * freshly-picked model pays a cache-write tax; we only switch when the economics win — cheaper warm
@@ -181,14 +182,14 @@ export interface Decision {
   cls: RouteClass;
   score: number;
   chosen: string;
-  /** Task hardness index into HARDNESS_ORDER; sets how far selection climbs the capability frontier. */
-  hardnessBucket: number;
+  /** Capability mode index into CAPABILITY_MODE_ORDER; sets the quality floor. */
+  modeBucket: number;
   requestedProfile?: ModelProfile;
   reason?: string;
 }
 
 export interface ClassificationResult {
-  hardness: Hardness;
+  mode: CapabilityMode;
   profile?: ModelProfile;
   score?: number;
   reason?: string;
@@ -254,8 +255,8 @@ export interface CacheAwareResult {
  * different scales and must not be shared. `loadConfig` picks the table matching `capabilitySource`
  * unless the user sets `willingness` explicitly.
  */
-export const AA_WILLINGNESS: Record<Hardness, number> = { trivial: 0.1, normal: 0.4, hard: 1.0, max: Infinity };
-export const RAMP_WILLINGNESS: Record<Hardness, number> = { trivial: 0.02, normal: 0.06, hard: 0.2, max: Infinity };
+export const AA_WILLINGNESS: Record<CapabilityMode, number> = { low: 0.1, medium: 0.4, high: 1.0, ultra: Infinity };
+export const RAMP_WILLINGNESS: Record<CapabilityMode, number> = { low: 0.02, medium: 0.06, high: 0.2, ultra: Infinity };
 
 export const DEFAULT_CONFIG: RouterConfig = {
   capabilitySource: "ramp",
@@ -266,7 +267,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
     toolDensity: 0.2,
   },
   log: false,
-  tierModels: {},
+  modeModels: {},
   modelFilter: { include: [], exclude: [] },
   modelOverrides: {},
   willingness: RAMP_WILLINGNESS,
@@ -279,7 +280,7 @@ export const DEFAULT_CONFIG: RouterConfig = {
   },
   quota: DEFAULT_QUOTA_CONFIG,
   classifier: {
-    enabled: true,
+    enabled: false,
     failureThreshold: 3,
     cooldownTurns: 20,
     timeoutMs: 3_000,
@@ -304,21 +305,27 @@ function mergeRouterConfig(raw: unknown): RouterConfig {
   if (!raw || typeof raw !== "object") return DEFAULT_CONFIG;
   const record = raw as Record<string, unknown>;
   const router = (record.router && typeof record.router === "object" ? record.router : record) as Partial<RouterConfig> & {
-    models?: RouterConfig["tierModels"];
+    models?: RouterConfig["modeModels"];
+    modeModels?: RouterConfig["modeModels"];
     overrides?: RouterConfig["modelOverrides"];
   };
   const capabilitySource = router.capabilitySource === "aa" ? "aa" : "ramp";
   const baseWillingness = capabilitySource === "aa" ? AA_WILLINGNESS : RAMP_WILLINGNESS;
-  const classifier = mergeClassifierConfig((router as Record<string, unknown>).classifier);
+  const rawClassifier = (router as Record<string, unknown>).classifier;
   const classifierModel = typeof (router as Record<string, unknown>).classifierModel === "string"
     ? (router as Record<string, string>).classifierModel
     : DEFAULT_CONFIG.classifierModel;
+  const classifier = enableClassifierForPinnedModel(
+    mergeClassifierConfig(rawClassifier),
+    classifierModel,
+    rawClassifier,
+  );
   return {
     ...DEFAULT_CONFIG,
     ...router,
     capabilitySource,
     weights: { ...DEFAULT_CONFIG.weights, ...(router.weights ?? {}) },
-    tierModels: { ...DEFAULT_CONFIG.tierModels, ...(router.tierModels ?? router.models ?? {}) },
+    modeModels: { ...DEFAULT_CONFIG.modeModels, ...(router.modeModels ?? router.models ?? {}) },
     modelFilter: { ...DEFAULT_CONFIG.modelFilter, ...(router.modelFilter ?? {}) },
     modelOverrides: { ...DEFAULT_CONFIG.modelOverrides, ...(router.modelOverrides ?? router.overrides ?? {}) },
     willingness: { ...baseWillingness, ...(router.willingness ?? {}) },
@@ -336,6 +343,20 @@ export function mergeClassifierConfig(
   if (raw === "off" || raw === false) return { ...base, enabled: false };
   if (!raw || typeof raw !== "object") return base;
   return { ...base, ...(raw as Partial<ClassifierConfig>) };
+}
+
+export function enableClassifierForPinnedModel(
+  classifier: ClassifierConfig,
+  classifierModel: string | undefined,
+  rawClassifier: unknown,
+): ClassifierConfig {
+  if (!classifierModel || classifierExplicitlyDisabled(rawClassifier)) return classifier;
+  return { ...classifier, enabled: true };
+}
+
+function classifierExplicitlyDisabled(raw: unknown): boolean {
+  return raw === "off" || raw === false ||
+    Boolean(raw && typeof raw === "object" && (raw as Partial<ClassifierConfig>).enabled === false);
 }
 
 export function inferFallbackProfile(context: Context): ModelProfile {
@@ -361,8 +382,9 @@ function defaultAgentDir(): string {
 export function resolveRouteModel(request: RouteModelRequest): RouteModelSelection | undefined {
   const hint = request.hint.trim();
   const normalizedHint = hint.toLowerCase();
+  const modeHint = parseCapabilityMode(normalizedHint);
   const concrete = request.models.find((candidate) => modelKey(candidate).toLowerCase() === normalizedHint);
-  if (normalizedHint !== "cheap" && normalizedHint !== "strong" && normalizedHint !== "auto") {
+  if (!modeHint && normalizedHint !== "auto") {
     if (!concrete || normalizedHint === "pi-router/auto") return undefined;
     return { key: modelKey(concrete) };
   }
@@ -376,7 +398,7 @@ export function resolveRouteModel(request: RouteModelRequest): RouteModelSelecti
     pool = filterPoolByQuotaPlanPrefix(pool, quota, Date.now());
   }
   pool = repriceForTimeOfDay(pool, request.nowHour ?? new Date().getHours());
-  const forced = normalizedHint === "cheap" || normalizedHint === "strong" ? { tier: normalizedHint } as const : undefined;
+  const forced = modeHint ? { mode: modeHint } as const : undefined;
   const decision = decide(context, undefined, forced, cfg);
   const selection = selectFromPool(decision, pool, context, undefined, cfg);
   if (!selection) return undefined;
@@ -389,14 +411,31 @@ export function normalizeModelKey(key: string): string {
   return withoutProvider.trim().replace(/\s*\((?:xhigh|high|medium|low|minimal|max)\)\s*$/i, "");
 }
 
-/** Resolve-rate at/above which a Ramp model is shown as a frontier/strong-pool candidate (display only). */
+/** Resolve-rate at/above which a Ramp model is shown as a frontier candidate (display only). */
 const RAMP_FRONTIER_RESOLVE = 75;
 
 /** Map a Ramp solve rate (0–100) to the user-facing capability mode. */
 export function rampCapabilityMode(resolveRate: number): CapabilityMode {
-  if (resolveRate >= MODE_SOLVE_BOUNDS[3][0]) return "ultra";
-  if (resolveRate >= MODE_SOLVE_BOUNDS[2][0]) return "high";
-  if (resolveRate >= MODE_SOLVE_BOUNDS[1][0]) return "medium";
+  return capabilityModeForValue(resolveRate, RAMP_MODE_BOUNDS);
+}
+
+/** Map AA Intelligence Index onto the same user-facing capability modes. */
+export function aaCapabilityMode(intelligence: number): CapabilityMode {
+  if (intelligence >= 56) return "ultra";
+  if (intelligence >= 52) return "high";
+  if (intelligence > 41) return "medium";
+  return "low";
+}
+
+export function parseCapabilityMode(value: string): CapabilityMode | undefined {
+  const normalized = value.trim().toLowerCase();
+  return CAPABILITY_MODE_ORDER.includes(normalized as CapabilityMode) ? normalized as CapabilityMode : undefined;
+}
+
+function capabilityModeForValue(value: number, bounds: readonly [number, number][]): CapabilityMode {
+  if (value >= bounds[3][0]) return "ultra";
+  if (value >= bounds[2][0]) return "high";
+  if (value >= bounds[1][0]) return "medium";
   return "low";
 }
 
@@ -471,6 +510,7 @@ export function resolveCanonicalModels(key: string, source: CapabilitySource = "
   return [{
     canonical,
     costTier: canonical.costTier,
+    capabilityMode: aaCapabilityMode(canonical.intelligence),
     profiles: canonical.profiles,
     frontier: canonical.frontier,
     intelligence: canonical.intelligence,
@@ -535,20 +575,15 @@ export function selectClassifierModel(
 ): ResolvedModel | undefined {
   if (!cfg.classifier.enabled) return undefined;
 
-  const candidates = pool.all.filter((item) => !isClassifierModelDisabled(state, modelKey(item.model), turn));
-  if (cfg.classifierModel) {
-    const ref = cfg.classifierModel.toLowerCase();
-    return candidates.find((item) =>
-      modelKey(item.model).toLowerCase() === ref ||
-      variantKey(item).toLowerCase() === ref ||
-      item.canonicalKey?.toLowerCase() === ref
-    );
-  }
+  if (!cfg.classifierModel) return undefined;
 
-  return [...candidates].sort((a, b) =>
-    a.priceBlended - b.priceBlended ||
-    modelKey(a.model).localeCompare(modelKey(b.model)),
-  )[0];
+  const ref = cfg.classifierModel.toLowerCase();
+  const candidates = pool.all.filter((item) => !isClassifierModelDisabled(state, modelKey(item.model), turn));
+  return candidates.find((item) =>
+    modelKey(item.model).toLowerCase() === ref ||
+    variantKey(item).toLowerCase() === ref ||
+    item.canonicalKey?.toLowerCase() === ref
+  );
 }
 
 export function resolveModel(model: Model<Api>, cfg: RouterConfig = DEFAULT_CONFIG): ResolvedModel {
@@ -703,44 +738,43 @@ function modelFilterHaystack(item: ResolvedModel): string {
 export function decide(
   context: Context,
   options: SimpleStreamOptions | undefined,
-  forced: { tier: Tier } | { model: string } | undefined,
+  forced: { mode: CapabilityMode } | { model: string } | undefined,
   cfg: RouterConfig,
   classifier: TaskClassifier = HEURISTIC_CLASSIFIER,
 ): Decision {
-  if (forced && "model" in forced) return { cls: "model", score: 1, chosen: forced.model, hardnessBucket: 3, reason: "forced model" };
-  if (forced && "tier" in forced) {
+  if (forced && "model" in forced) return { cls: "model", score: 1, chosen: forced.model, modeBucket: 3, reason: "forced model" };
+  if (forced && "mode" in forced) {
+    const modeBucket = CAPABILITY_MODE_ORDER.indexOf(forced.mode);
     return {
-      cls: forced.tier,
-      score: forced.tier === "strong" ? 1 : 0,
+      cls: forced.mode,
+      score: MODE_SCORE_BOUNDS[modeBucket][0],
       chosen: "",
-      // @cheap means "cheapest acceptable"; @strong means "the strong end".
-      hardnessBucket: forced.tier === "strong" ? 3 : 0,
+      modeBucket,
       requestedProfile: inferFallbackProfile(context),
-      reason: "forced",
+      reason: `forced ${forced.mode}`,
     };
   }
 
   const classification = classifier.classify(context, cfg);
   const requestedProfile = classification.profile ?? inferFallbackProfile(context);
-  const hardnessBucket = hardnessBucketIndex(classification.hardness);
-  const score = classification.score ?? representativeHardnessScore(classification.hardness);
+  const modeBucket = capabilityModeBucketIndex(classification.mode);
+  const score = classification.score ?? representativeModeScore(classification.mode);
   return {
-    cls: hardnessBucket >= 2 ? "strong" : "cheap",
+    cls: classification.mode,
     score,
     chosen: "",
-    hardnessBucket,
+    modeBucket: modeBucket,
     requestedProfile,
     reason: classification.reason,
   };
 }
 
 /**
- * Continuous task-hardness bucket (index into HARDNESS_ORDER) for auto mode. The bucket — not a
- * binary cheap/strong split — drives the capability floor, so the whole frontier (incl. mid-tier
- * models) becomes reachable. Driven purely by task content: the thinking level is a passthrough that
- * controls how deeply the *chosen* model reasons, never which model is chosen.
+ * Continuous difficulty bucket for auto mode. The bucket drives the capability floor, so the whole
+ * frontier (incl. mid-tier models) becomes reachable. Driven purely by task content: the thinking
+ * level is a passthrough that controls how deeply the *chosen* model reasons, never which model is chosen.
  */
-export function autoHardnessBucket(score: number): number {
+export function autoModeBucket(score: number): number {
   return score < 0.3 ? 0 : score < 0.52 ? 1 : score < 0.74 ? 2 : 3;
 }
 
@@ -760,20 +794,20 @@ export function classify(context: Context, cfg: RouterConfig): number {
 export const HEURISTIC_CLASSIFIER: TaskClassifier = {
   classify(context, cfg) {
     const score = classify(context, cfg);
-    const hardness = HARDNESS_ORDER[autoHardnessBucket(score)];
-    return { hardness, score, profile: inferRequestedProfile(context), reason: "heuristic" };
+    const mode = CAPABILITY_MODE_ORDER[autoModeBucket(score)];
+    return { mode, score, profile: inferRequestedProfile(context), reason: "heuristic" };
   },
 };
 
 export function parseClassificationOutput(text: string): ClassificationResult | undefined {
   const lower = text.toLowerCase();
-  const hardness = matchEnum(lower, ["trivial", "normal", "hard", "max"]);
-  if (!hardness) return undefined;
+  const mode = matchEnum(lower, ["low", "medium", "high", "ultra"]);
+  if (!mode) return undefined;
 
   const profile = matchEnum(lower, ["deep", "fast", "coder", "balanced", "vision"]);
   const score = parseScore(lower);
   return {
-    hardness,
+    mode,
     profile,
     score,
     reason: "llm-classifier",
@@ -782,7 +816,7 @@ export function parseClassificationOutput(text: string): ClassificationResult | 
 
 function matchEnum<const T extends string>(text: string, values: readonly T[]): T | undefined {
   const alternation = values.join("|");
-  const keyed = text.match(new RegExp(`\\b(?:hardness|difficulty|level|profile|task_profile)\\s*[:=]\\s*(${alternation})\\b`));
+  const keyed = text.match(new RegExp(`\\b(?:mode|capability|level|profile|task_profile)\\s*[:=]\\s*(${alternation})\\b`));
   const loose = keyed ?? text.match(new RegExp(`\\b(${alternation})\\b`));
   return loose?.[1] as T | undefined;
 }
@@ -814,12 +848,12 @@ export function recordClassifierFailure(state: ClassifierState, key: string, tur
     : { ...previous, failures };
 }
 
-function hardnessBucketIndex(hardness: Hardness): number {
-  return HARDNESS_ORDER.indexOf(hardness);
+function capabilityModeBucketIndex(mode: CapabilityMode): number {
+  return CAPABILITY_MODE_ORDER.indexOf(mode);
 }
 
-function representativeHardnessScore(hardness: Hardness): number {
-  return [0.15, 0.4, 0.63, 0.86][hardnessBucketIndex(hardness)] ?? 0.4;
+function representativeModeScore(mode: CapabilityMode): number {
+  return [0.15, 0.4, 0.63, 0.86][capabilityModeBucketIndex(mode)] ?? 0.4;
 }
 
 export function inferRequestedProfile(context: Context): ModelProfile {
@@ -905,22 +939,23 @@ function climbFrontier(chain: ResolvedModel[], profile: ModelProfile, willingnes
   return pick;
 }
 
-function rampModeTarget(decision: Decision): { mode: CapabilityMode; solveRate: number; position: number } {
-  const bucket = Math.max(0, Math.min(CAPABILITY_MODE_ORDER.length - 1, Math.trunc(decision.hardnessBucket)));
-  const [scoreLow, scoreHigh] = HARDNESS_SCORE_BOUNDS[bucket];
+function capabilityModeTarget(decision: Decision, cfg: RouterConfig): { mode: CapabilityMode; floor: number; position: number } {
+  const bucket = Math.max(0, Math.min(CAPABILITY_MODE_ORDER.length - 1, Math.trunc(decision.modeBucket)));
+  const [scoreLow, scoreHigh] = MODE_SCORE_BOUNDS[bucket];
   const score = Number.isFinite(decision.score) ? decision.score : scoreLow;
   const position = (Math.max(scoreLow, Math.min(scoreHigh, score)) - scoreLow) / (scoreHigh - scoreLow);
-  const [solveLow, solveHigh] = MODE_SOLVE_BOUNDS[bucket];
+  const bounds = cfg.capabilitySource === "aa" ? AA_MODE_BOUNDS : RAMP_MODE_BOUNDS;
+  const [floorLow, floorHigh] = bounds[bucket];
   return {
     mode: CAPABILITY_MODE_ORDER[bucket],
-    solveRate: solveLow + position * (solveHigh - solveLow),
+    floor: floorLow + position * (floorHigh - floorLow),
     position,
   };
 }
 
-function cheapestMeetingFloor(items: ResolvedModel[], solveRate: number): ResolvedModel | undefined {
+function cheapestMeetingFloor(items: ResolvedModel[], floor: number): ResolvedModel | undefined {
   return [...items]
-    .filter((item) => item.intelligence >= solveRate)
+    .filter((item) => item.intelligence >= floor)
     .sort((a, b) =>
       a.priceBlended - b.priceBlended ||
       b.intelligence - a.intelligence ||
@@ -928,8 +963,8 @@ function cheapestMeetingFloor(items: ResolvedModel[], solveRate: number): Resolv
     )[0];
 }
 
-function finiteWillingness(cfg: RouterConfig, hardness: Hardness): number {
-  const configured = cfg.willingness[hardness];
+function finiteWillingness(cfg: RouterConfig, mode: CapabilityMode): number {
+  const configured = cfg.willingness[mode];
   if (Number.isFinite(configured)) return Math.max(0, configured);
   return Math.max(0, ...Object.values(cfg.willingness).filter(Number.isFinite));
 }
@@ -979,8 +1014,8 @@ export function selectFromPool(
   const { eligible, overflow } = eligibleModels(pool, context);
   if (eligible.length === 0) return undefined;
 
-  const bucket = decision.hardnessBucket;
-  const hardness = HARDNESS_ORDER[Math.max(0, Math.min(HARDNESS_ORDER.length - 1, bucket))];
+  const bucket = decision.modeBucket;
+  const selectedMode = CAPABILITY_MODE_ORDER[Math.max(0, Math.min(CAPABILITY_MODE_ORDER.length - 1, bucket))];
 
   // `fast` is orthogonal: gate on a low capability floor, then maximize throughput.
   if (profile === "fast") {
@@ -998,35 +1033,34 @@ export function selectFromPool(
   // First remove strictly dominated variants; every later choice stays on this economic frontier.
   const chain = frontierChain(eligible, profile);
 
-  // Ramp maps task difficulty to a solve-rate floor, then spends only on affordable upgrades inside
-  // that Mode. AA has no comparable solve-rate scale and retains the source-specific frontier climb.
-  if (cfg.capabilitySource === "ramp") {
-    const target = rampModeTarget(decision);
-    const sameMode = chain.filter((item) => item.capabilityMode === target.mode);
-    if (sameMode.length > 0) {
-      const base = cheapestMeetingFloor(sameMode, target.solveRate) ?? [...sameMode].sort((a, b) =>
-        b.intelligence - a.intelligence ||
-        a.priceBlended - b.priceBlended ||
-        modelKey(a.model).localeCompare(modelKey(b.model)),
-      )[0];
-      const willingness = finiteWillingness(cfg, hardness) * target.position;
-      const selected = climbWithinMode(base, sameMode, willingness);
-      const reason = `${target.mode} floor≥${target.solveRate.toFixed(1)} w≤$${willingness.toFixed(3)}/pt → ${selected.intelligence.toFixed(1)}@$${selected.priceBlended}${overflowNote(overflow)}`;
-      return buildSelection(selected, chain, profile, reason);
-    }
-
-    const selected = nearestModeFallback(chain, target.mode);
-    if (selected) {
-      const reason = `${target.mode} unavailable → ${selected.capabilityMode} ${selected.intelligence.toFixed(1)}@$${selected.priceBlended}${overflowNote(overflow)}`;
-      return buildSelection(selected, chain, profile, reason);
-    }
+  // Task difficulty maps to Low/Medium/High/Ultra, then spends only on affordable upgrades inside
+  // that mode. Ramp uses solve rate as the floor; AA uses Intelligence Index thresholds.
+  const target = capabilityModeTarget(decision, cfg);
+  const sameMode = chain.filter((item) => item.capabilityMode === target.mode);
+  if (sameMode.length > 0) {
+    const base = cheapestMeetingFloor(sameMode, target.floor) ?? [...sameMode].sort((a, b) =>
+      b.intelligence - a.intelligence ||
+      a.priceBlended - b.priceBlended ||
+      modelKey(a.model).localeCompare(modelKey(b.model)),
+    )[0];
+    const willingness = finiteWillingness(cfg, selectedMode) * target.position;
+    const selected = climbWithinMode(base, sameMode, willingness);
+    const axisLabel = cfg.capabilitySource === "aa" ? "AA floor" : "solve floor";
+    const reason = `${target.mode} ${axisLabel}≥${target.floor.toFixed(1)} w≤$${willingness.toFixed(3)}/pt → ${selected.intelligence.toFixed(1)}@$${selected.priceBlended}${overflowNote(overflow)}`;
+    return buildSelection(selected, chain, profile, reason);
   }
 
-  const willingness = cfg.willingness[hardness];
+  const selectedByMode = nearestModeFallback(chain, target.mode);
+  if (selectedByMode) {
+    const reason = `${target.mode} unavailable → ${selectedByMode.capabilityMode} ${selectedByMode.intelligence.toFixed(1)}@$${selectedByMode.priceBlended}${overflowNote(overflow)}`;
+    return buildSelection(selectedByMode, chain, profile, reason);
+  }
+
+  const willingness = cfg.willingness[selectedMode];
   const selected = climbFrontier(chain, profile, willingness);
 
   const budget = willingness === Infinity ? "∞" : willingness.toString();
-  const reason = `${hardness}/${profile} w≤$${budget}/pt → ${axisValue(selected, profile).toFixed(0)}@$${selected.priceBlended}${overflowNote(overflow)}`;
+  const reason = `${selectedMode}/${profile} w≤$${budget}/pt → ${axisValue(selected, profile).toFixed(0)}@$${selected.priceBlended}${overflowNote(overflow)}`;
   return buildSelection(selected, chain, profile, reason);
 }
 
@@ -1051,7 +1085,7 @@ function overflowNote(overflow: boolean): string {
 
 // ── Cross-turn cache-aware stickiness ────────────────────────────────────────
 // Layered on top of the Pareto pick. The Pareto pass says which model best fits this turn's
-// hardness; this pass asks whether a warm cache lease is worth keeping instead of switching to it.
+// selected mode; this pass asks whether a warm cache lease is worth keeping instead of switching to it.
 
 export function createRoutingState(): RoutingState {
   return { lastSwitchTurn: Number.NEGATIVE_INFINITY, observedCacheReadRatio: 0, realizedCostByModel: {} };

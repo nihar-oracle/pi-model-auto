@@ -42,19 +42,23 @@ Check what the router sees:
 /auto
 ```
 
-Force one turn when you know what you want:
+Most turns should use automatic routing. At the start of a new conversation, you can pin the initial capability mode:
 
 ```text
-@cheap update the README
-@strong debug this race condition
+@low summarize this file
+@medium implement this small change
+@high debug this failing test
+@ultra investigate this architecture issue
 @model:anthropic/claude-3-5-sonnet-20241022 use Sonnet here
 ```
 
-- `@cheap` asks for the lower edge of `Low`.
-- `@strong` asks for `Ultra`, falling back to the strongest available lower mode.
+- `@low`, `@medium`, `@high`, and `@ultra` target the matching capability mode.
 - `@model:provider/model-id` uses that exact model.
+- Without a prefix, `auto` routing lets task difficulty choose the target mode.
 
-The prefix is removed before the model sees your prompt.
+These prefixes are intentionally only honored on the first user turn of a conversation. They do not create an isolated subagent or trimmed context. If you used them after a long history, the selected model would need to read the existing session history, which can be much more expensive. Start a new session when you want to pin a mode cleanly.
+
+The prefix is removed before the model sees your prompt. `cheap` and `strong` are no longer supported routing hints; use `low` and `ultra` instead.
 
 ## Configure When Needed
 
@@ -74,6 +78,9 @@ Project config overrides user config.
 {
   "router": {
     "modelFilter": { "include": ["anthropic", "z-ai"], "exclude": [] },
+    "modeModels": {
+      "ultra": "anthropic/claude-3-5-sonnet-20241022"
+    },
     "modelOverrides": {
       "anthropic/claude-3-5-sonnet-20241022": { "costCoef": 0.05 },
       "z-ai/glm-5.2": {
@@ -85,7 +92,7 @@ Project config overrides user config.
 }
 ```
 
-Use provider/model ids exactly as they appear in your Pi registry. The names above are public examples.
+Use provider/model ids exactly as they appear in your Pi registry. The names above are public examples. `modeModels` is optional; if you omit it, the router builds each mode from benchmark metadata.
 
 ### `costCoef`
 
@@ -123,15 +130,137 @@ Quality comes from one benchmark table. Cost starts from the same table, then ap
 
 The numeric tables live in [`src/canonical-models.ts`](src/canonical-models.ts). The two sources are not mixed.
 
-With the Ramp source, the status label is an Amp-style capability mode derived only from solve rate: `Ultra` at 85% or above, `High` at 80–85%, `Medium` at 75–80%, and `Low` below 75%. Cost remains a separate routing axis and never determines this label.
+The user-facing status label is a capability mode. Cost is a separate routing axis and never determines this label.
 
-Task hardness chooses the mode, while the continuous difficulty score sets a solve-rate floor inside that mode. The router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. If the target mode has no models at all, it borrows the nearest stronger mode; if none exists, it uses the strongest model in the nearest lower mode. Models without capability-mode metadata retain Pareto routing.
+For the Ramp source, the mode is derived only from SWE-bench solve rate:
 
-Task difficulty is judged from language-neutral signals: context size, prompt length, and recent tool activity. In automatic routing, benchmark-backed effort is selected with the model and takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, pin with `@strong`.
+| mode | Ramp solve rate | representative measured models |
+| --- | --- | --- |
+| `Ultra` | `>= 85%` | `claude-opus-5`, `claude-fable-5` |
+| `High` | `80–85%` | `gpt-5.5`, `gpt-5.6-sol`, `grok-4.5`, `glm-5.2` |
+| `Medium` | `75–80%` | `kimi-k2.7-code`, `claude-opus-4-8`, `gpt-5.6-terra` |
+| `Low` | `< 75%` | `gemini-3.1-pro`, `claude-sonnet-5`, `gpt-5.4`, `gpt-5.4-nano` |
 
-By default, the router also refreshes an LLM classifier in the background. The current turn uses the previous classification result, so time-to-first-token is not blocked. The classifier model is chosen from your authenticated, filtered auto pool by cheapest effective price, unless `classifierModel` pins a specific provider/model. The classifier receives the last user message plus small routing stats; it never uses a provider outside your configured pool.
+For the AA source, the same four modes are mapped from Artificial Analysis Intelligence Index bands:
 
-Turn it off completely:
+| mode | AA Intelligence Index | representative AA models |
+| --- | --- | --- |
+| `Ultra` | `>= 56` | `claude-opus-5`, `claude-fable-5`, `gpt-5.6-sol`, `kimi-k3` |
+| `High` | `52–56` | `gpt-5.6-terra`, `grok-4.5`, `claude-opus-4-7`, `claude-sonnet-5`, `gpt-5.5` |
+| `Medium` | `> 41 and < 52` | `gpt-5.4`, `gpt-5.6-luna`, `glm-5.2`, `gemini-3.1-pro`, `kimi-k2.7-code` |
+| `Low` | `<= 41` | `deepseek-v4-flash`, `glm-5.1`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gemini-3.1-flash-lite` |
+
+Representative models are examples from the bundled benchmark tables, not requirements. The router only uses models that are present in your local Pi registry, authenticated, and allowed by `modelFilter`. If none of your available models are in the target mode, the router borrows the nearest stronger mode; if no stronger mode exists, it uses the strongest available lower mode. If no authenticated benchmark-backed models are available at all, it asks you to `/login` or configure model metadata.
+
+Task difficulty chooses the mode, while the continuous difficulty score sets a capability floor inside that mode. The router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. Models without capability-mode metadata retain Pareto routing.
+
+Task difficulty is judged from language-neutral signals: context size, prompt length, and recent tool activity. In automatic routing, benchmark-backed effort is selected with the model and takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
+
+By default, the router uses only the local heuristic and makes no extra classifier model call. You can opt in to a small current-turn LLM classifier by setting `classifierModel`.
+
+### Classifier and Coarse Auto Detection
+
+Automatic routing has two layers:
+
+1. **Local heuristic, always available.** It computes a rough difficulty score from language-neutral signals: estimated context size, current prompt length, and recent tool-result density. This is free, deterministic, and private, but intentionally coarse; it cannot deeply understand whether a short request is semantically hard.
+2. **Bounded LLM classifier, opt-in.** It runs only after you configure `classifierModel` with an exact model id. For auto routing, the router first makes a local draft decision. It runs the classifier for the current turn only when there is no previous route yet, or when that draft decision would switch away from the previous/warm model. Forced `@low`/`@medium`/`@high`/`@ultra`/`@model:...` turns and tool-call continuations do not run the classifier.
+
+#### Local heuristic, no LLM
+
+When the classifier is disabled or skipped, the router computes:
+
+```text
+score = normalize(estimatedContextTokens, 8_000, 120_000) * weights.contextTokens
+      + normalize(lastUserMessage.length, 120, 1_200) * weights.lastUserLen
+      + min(1, recentToolResults / 8) * weights.toolDensity
+```
+
+Default weights are:
+
+```jsonc
+{
+  "weights": {
+    "contextTokens": 0.3,
+    "lastUserLen": 0.5,
+    "toolDensity": 0.2
+  }
+}
+```
+
+The score maps to mode buckets:
+
+| score | mode |
+| --- | --- |
+| `< 0.30` | `low` |
+| `0.30–0.52` | `medium` |
+| `0.52–0.74` | `high` |
+| `>= 0.74` | `ultra` |
+
+This is deliberately language-neutral: it does not look for English keywords. It mostly asks, "how much context, how much prompt, how much recent tool activity?" That makes it cheap and predictable, but it can under-classify short, high-risk requests.
+
+#### LLM classifier prompt
+
+If the bounded classifier runs, it receives the following system prompt:
+
+```text
+You are Pi Router's classifier. Classify the current user turn for model routing.
+Return exactly one line and no prose: mode=<low|medium|high|ultra> profile=<balanced|coder|deep|fast|vision> score=<0..1>.
+Mode is required capability, not cost. Cost is handled later by the router.
+Mode rubric:
+- low: trivial, explain, summarize, docs/copy edits, tiny localized change, low ambiguity.
+- medium: routine coding/debugging/refactor, small scoped implementation, ordinary tests, a few files.
+- high: multi-file work, failing tests, unknown root cause, API/design decisions, non-trivial tool use, sizeable context.
+- ultra: architecture/security/migrations, production-risk changes, large refactor, long-horizon investigation, high ambiguity or high cost of failure.
+Profile rubric:
+- vision if hasImage=true.
+- fast only when the user explicitly prioritizes speed/latency or the task is a simple transform.
+- coder for implementation, debugging, refactoring, tests, or code review.
+- deep for architecture, root-cause analysis, security, planning, or long-horizon reasoning.
+- balanced otherwise.
+Score is position inside the chosen mode: low 0.00-0.29, medium 0.30-0.51, high 0.52-0.73, ultra 0.74-1.00.
+If uncertain between adjacent modes, choose the lower mode unless the task is risky, irreversible, security-sensitive, or explicitly asks for deep investigation.
+```
+
+The classifier model receives only this user payload:
+
+```text
+estimatedContextTokens=<local estimate>
+hasImage=<true|false>
+lastUserMessage:
+<the latest user message>
+```
+
+It does **not** receive the full conversation history. The full session is only inspected locally to estimate token count, count recent tool results, and detect whether images exist.
+
+The classifier returns the same `low` / `medium` / `high` / `ultra` vocabulary users see in the UI. The optional `score` positions the request inside that mode's capability floor; the classifier does not directly choose a model.
+
+#### Classifier cost controls
+
+Classifier cost is bounded in several ways:
+
+- The classifier prompt omits prior assistant/user turns and tool output bodies.
+- Output is capped at `maxTokens: 80`.
+- It uses `temperature: 0`, `reasoning: minimal` when the model supports reasoning, the configured timeout, and no internal retries.
+- It is gated by the local draft decision: after the first auto turn, if the draft keeps the previous/warm model, no classifier call is made.
+- Tool-call continuations reuse the same turn route and do not run extra classifier calls.
+- Forced first-turn pins (`@low`/`@medium`/`@high`/`@ultra`/`@model:...`) do not run the classifier.
+- If the classifier output cannot be parsed or the model fails repeatedly, that classifier model is temporarily disabled and routing falls back to the local heuristic / other classifier candidates.
+
+#### Choosing whether to use the classifier
+
+The classifier is off by default. To enable semantic classification, pin it to an exact endpoint:
+
+```jsonc
+{
+  "router": {
+    "classifierModel": "gateway/gpt-5.4-nano"
+  }
+}
+```
+
+Use the exact `provider/model` id from your Pi registry. If you want a Low-mode classifier, pick a model that is actually available locally and falls in Low for your active `capabilitySource`; for example, with the default Ramp source, `gpt-5.4-nano`, `qwen3.7-plus`, or another local Low model can be good candidates. `classifierModel` is an exact pin, not a mode name: use `"gateway/gpt-5.4-nano"`, not `"low"`.
+
+You can still force it off explicitly, even if a shared config sets a classifier model:
 
 ```jsonc
 {
@@ -140,6 +269,12 @@ Turn it off completely:
   }
 }
 ```
+
+Trade-offs:
+
+- **Default / classifier off:** no extra model call; routing relies only on local context size, prompt length, and recent tool activity.
+- **Pinned low-cost classifier:** predictable and cheap, but may miss subtle hard requests.
+- **Pinned stronger classifier:** may classify hard/ambiguous work better, but adds cost and is usually unnecessary because the main route still has local heuristics, manual first-turn mode pins, and cache-aware routing.
 
 One user turn keeps one model, including tool-call continuations. Automatic routing also avoids quota-cooled plans and avoids switching away from a useful warm cache when the switch is not worth it.
 
@@ -155,13 +290,13 @@ As a result, a turn routed to a 272K model displays and compacts against 272K; a
 | --- | --- |
 | `capabilitySource` | Choose `"ramp"` or `"aa"`. |
 | `modelFilter` | Include or exclude providers/models by substring. |
-| `models` | Pin the configured `cheap` or `strong` endpoint. |
+| `modeModels` | Pin exact endpoints for `low`, `medium`, `high`, or `ultra`. |
 | `modelOverrides` | Adjust cost or metadata for known/private/local models. |
-| `willingness` | Control affordable same-mode upgrades under Ramp, or frontier climbing under AA. |
+| `willingness` | Control affordable same-mode upgrades after a capability mode is selected. |
 | `cacheAware` | Keep warm prompt caches when switching is not worth it. Enabled by default. |
 | `quota` | Skip cooled-down plans after rate-limit headers or `429`. Enabled by default. |
-| `classifier` | Enable, tune, or disable the background LLM classifier. Use `"off"` to disable. |
-| `classifierModel` | Pin the classifier to a specific provider/model in your pool. |
+| `classifier` | Tune or explicitly disable the bounded LLM classifier. Use `"off"` to disable. |
+| `classifierModel` | Opt in to the classifier by pinning a specific provider/model or variant in your pool. Use an exact id, not `low`/`medium`/`high`/`ultra`. |
 | `weights` | Language-neutral difficulty-scoring weights. Advanced. |
 | `log` | Append routing decisions to `.pi/router.log`. |
 
@@ -173,9 +308,9 @@ Useful override fields:
 | `costCoefHours` | Local-hour multipliers. |
 | `canonical` | Name shown in `/auto`. |
 | `costTier` | Cost-only classification: `cheap`, `standard`, `premium`, or `unknown`. |
-| `capabilityMode` | Override the Ramp-style mode: `low`, `medium`, `high`, or `ultra`. |
+| `capabilityMode` | Override the capability mode: `low`, `medium`, `high`, or `ultra`. |
 | `profiles` | `deep`, `fast`, `coder`, `balanced`, `vision`, `frontier`. |
-| `frontier` | Whether the model can appear in the strong frontier. |
+| `frontier` | Whether the model can appear in the frontier display/pool. |
 | `benchmarkEffort` | Pi-normalized effort (`minimal`, `low`, `medium`, `high`, `xhigh`) backing a manual metric row. |
 | `priceBlended`, `intelligence`, `scores`, `tps` | Raw metrics for models without benchmark data. |
 
@@ -190,7 +325,7 @@ import { resolveRouteModel } from "pi-model-auto/core";
 
 const selection = resolveRouteModel({
   models: availableModels,
-  hint: "cheap", // cheap | strong | auto | provider/model
+  hint: "high", // routing hint: low | medium | high | ultra | auto | provider/model
   context,
 });
 ```
