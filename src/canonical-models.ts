@@ -39,7 +39,7 @@ export interface CanonicalMeta {
   source?: string;
 }
 
-const AA = "Artificial Analysis, 2026-06";
+const AA = "Artificial Analysis, 2026-07";
 const AA_API = "Artificial Analysis Data API, 2026-07";
 const RAMP = "Ramp SWE-Bench (mini-swe-agent), 2026-07";
 
@@ -56,60 +56,62 @@ const RAMP = "Ramp SWE-Bench (mini-swe-agent), 2026-07";
  */
 export const CANONICAL_MODELS: CanonicalMeta[] = [
   // OpenAI
-  { key: "gpt-5.6-sol", intelligence: 58.9, priceBlended: 11.25, scores: { coding: 77.4, agentic: 0.540 }, tps: 55, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
-  { key: "gpt-5.6-terra", intelligence: 55.0, priceBlended: 5.625, scores: { coding: 76.7, agentic: 0.474 }, tps: 136, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
-  { key: "gpt-5.6-luna", intelligence: 51.2, priceBlended: 2.25, scores: { coding: 71.4, agentic: 0.456 }, tps: 186, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA_API },
+  { key: "gpt-5.6-sol", intelligence: 58.89, priceBlended: 11.25, scores: { coding: 77.388, agentic: 0.540 }, tps: 65.927, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
+  { key: "gpt-5.6-terra", intelligence: 54.953, priceBlended: 5.625, scores: { coding: 76.655, agentic: 0.474 }, tps: 135.703, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
+  { key: "gpt-5.6-luna", intelligence: 51.236, priceBlended: 2.25, scores: { coding: 71.448, agentic: 0.456 }, tps: 188.111, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA_API },
   { key: "gpt-5.5", intelligence: 53.1, priceBlended: 11.25, scores: { coding: 71.6, agentic: 0.794, ifbench: 0.716 }, tps: 83, costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "gpt-5.4", intelligence: 51.4, priceBlended: 5.625, scores: { coding: 71.1, agentic: 0.783, ifbench: 0.739 }, tps: 168, costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "gpt-5.4-mini", intelligence: 40.0, priceBlended: 1.688, scores: { coding: 56.1, agentic: 0.592, ifbench: 0.733 }, tps: 202, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "gpt-5.4-nano", intelligence: 38.2, priceBlended: 0.463, scores: { coding: 56.1, agentic: 0.607, ifbench: 0.759 }, tps: 168, costTier: "cheap", profiles: ["coder", "fast"], frontier: false, source: AA },
   { key: "gpt-5.3-codex-spark", intelligence: 44.3, priceBlended: 4.813, scores: { coding: 62.0, agentic: 0.62, ifbench: 0.754 }, tps: 130, costTier: "standard", profiles: ["coder", "fast"], frontier: false, source: `${AA} (coding/agentic estimated)` },
   { key: "gpt-4.1", intelligence: 15.2, priceBlended: 1.52, scores: { coding: 15.2, agentic: 0.152 }, costTier: "premium", profiles: ["balanced"], frontier: false, source: RAMP },
-  { key: "gpt-oss-120b", intelligence: 23.8, priceBlended: 0.262, scores: { coding: 30.4, agentic: 0.262, ifbench: 0.690 }, tps: 347, costTier: "cheap", profiles: ["balanced"], frontier: false, source: AA },
+  { key: "gpt-oss-120b", intelligence: 23.831, priceBlended: 0.2625, scores: { coding: 30.441, agentic: 0.132 }, tps: 273.314, costTier: "cheap", profiles: ["balanced"], frontier: false, source: AA },
   // Anthropic
-  { key: "claude-fable-5", intelligence: 59.9, priceBlended: 20, scores: { coding: 76.5, agentic: 0.846, ifbench: 0.635 }, tps: 70, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
-  { key: "claude-opus-4-8", intelligence: 55.7, priceBlended: 10, scores: { coding: 74.3, agentic: 0.846, ifbench: 0.622 }, tps: 70, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "claude-opus-5", intelligence: 60.692, priceBlended: 10, scores: { coding: 77.983, agentic: 0.553 }, tps: 52.562, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "claude-fable-5", intelligence: 59.861, priceBlended: 20, scores: { coding: 76.491, agentic: 0.528, ifbench: 0.635 }, tps: 71.392, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "claude-opus-4-8", intelligence: 55.692, priceBlended: 10, scores: { coding: 74.254, agentic: 0.472, ifbench: 0.622 }, tps: 56.048, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "claude-opus-4-7", intelligence: 53.5, priceBlended: 10, scores: { coding: 73.6, agentic: 0.831, ifbench: 0.586 }, tps: 58, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA },
   { key: "claude-opus-4-6", intelligence: 79.7, priceBlended: 1.47, scores: { coding: 79.7, agentic: 0.797 }, costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: RAMP },
-  { key: "claude-sonnet-5", intelligence: 74.7, priceBlended: 1.22, scores: { coding: 74.7, agentic: 0.747 }, costTier: "premium", profiles: ["coder", "balanced"], frontier: false, source: RAMP },
+  { key: "claude-sonnet-5", intelligence: 53.350, priceBlended: 4, scores: { coding: 71.546, agentic: 0.467 }, tps: 76.061, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "claude-sonnet-4-6", intelligence: 47.2, priceBlended: 6, scores: { coding: 63.0, agentic: 0.712, ifbench: 0.566 }, tps: 69, costTier: "premium", profiles: ["coder", "balanced"], frontier: false, source: AA },
-  { key: "claude-4-5-haiku", aliases: ["claude-haiku-4-5"], intelligence: 29.6, priceBlended: 2, scores: { coding: 43.9, agentic: 0.442, ifbench: 0.543 }, tps: 173, costTier: "standard", profiles: ["fast", "balanced"], frontier: false, source: AA },
+  { key: "claude-4-5-haiku", aliases: ["claude-haiku-4-5"], intelligence: 29.576, priceBlended: 2, scores: { coding: 43.892, agentic: 0.164, ifbench: 0.543 }, tps: 92.337, benchmarkEffort: "xhigh", costTier: "standard", profiles: ["fast", "balanced"], frontier: false, source: AA },
   // Google
-  { key: "gemini-3.5-flash", intelligence: 50.2, priceBlended: 3.375, scores: { coding: 70.1, agentic: 0.787, ifbench: 0.763 }, tps: 247, benchmarkEffort: "high", costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
-  { key: "gemini-3.1-pro", aliases: ["gemini-3.1-pro-preview"], intelligence: 46.5, priceBlended: 4.5, scores: { coding: 68.8, agentic: 0.738, ifbench: 0.771 }, tps: 152, costTier: "premium", profiles: ["deep", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "gemini-3.6-flash", intelligence: 50.068, priceBlended: 3, scores: { coding: 69.239, agentic: 0.387 }, tps: 231.428, benchmarkEffort: "high", costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "gemini-3.5-flash", intelligence: 50.068, priceBlended: 3, scores: { coding: 69.239, agentic: 0.387 }, tps: 231.428, benchmarkEffort: "high", costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
+  { key: "gemini-3.1-pro", aliases: ["gemini-3.1-pro-preview"], intelligence: 46.459, priceBlended: 4.5, scores: { coding: 68.826, agentic: 0.214, ifbench: 0.771 }, tps: 123.613, costTier: "premium", profiles: ["deep", "balanced", "frontier"], frontier: true, source: AA },
   { key: "gemini-3.1-flash-lite", intelligence: 25.0, priceBlended: 0.563, scores: { coding: 34.7, agentic: 0.311, ifbench: 0.772 }, tps: 355, costTier: "cheap", profiles: ["fast", "balanced"], frontier: false, source: AA },
   // DeepSeek
-  { key: "deepseek-v4-pro", intelligence: 44.3, priceBlended: 0.544, scores: { coding: 59.4, agentic: 0.640, ifbench: 0.765 }, tps: 104, costTier: "standard", profiles: ["deep", "balanced"], frontier: false, source: AA },
-  { key: "deepseek-v4-flash", aliases: ["deepseek-flash"], intelligence: 40.3, priceBlended: 0.175, scores: { coding: 56.2, agentic: 0.618, ifbench: 0.792 }, tps: 113, costTier: "cheap", profiles: ["fast", "balanced"], frontier: false, source: AA },
+  { key: "deepseek-v4-pro", intelligence: 44.274, priceBlended: 0.54375, scores: { coding: 59.363, agentic: 0.364, ifbench: 0.765 }, tps: 66.596, benchmarkEffort: "xhigh", costTier: "standard", profiles: ["deep", "balanced"], frontier: false, source: AA },
+  { key: "deepseek-v4-flash", aliases: ["deepseek-flash"], intelligence: 40.283, priceBlended: 0.175, scores: { coding: 56.168, agentic: 0.311, ifbench: 0.792 }, tps: 121.442, benchmarkEffort: "xhigh", costTier: "cheap", profiles: ["fast", "balanced"], frontier: false, source: AA },
   // xAI
-  { key: "grok-4.5", intelligence: 81.0, priceBlended: 1.14, scores: { coding: 81.0, agentic: 0.81 }, costTier: "standard", profiles: ["coder", "balanced", "frontier"], frontier: true, source: RAMP },
+  { key: "grok-4.5", intelligence: 53.827, priceBlended: 3, scores: { coding: 72.449, agentic: 0.457 }, tps: 61.029, benchmarkEffort: "high", costTier: "standard", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "grok-4.3", intelligence: 37.6, priceBlended: 1.563, scores: { coding: 42.2, agentic: 0.397, ifbench: 0.813 }, tps: 185, costTier: "standard", profiles: ["balanced"], frontier: false, source: AA },
   // Alibaba Qwen
   { key: "qwen3.7-max", intelligence: 46.0, priceBlended: 3.75, scores: { coding: 66.0, agentic: 0.745, ifbench: 0.805 }, tps: 203, costTier: "premium", profiles: ["coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "qwen3.7-plus", aliases: ["qwen3p7-plus"], intelligence: 39.0, priceBlended: 0.59, scores: { coding: 55.9, agentic: 0.610, ifbench: 0.780 }, tps: 51, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "qwen3.6-plus", aliases: ["qwen3p6-plus"], intelligence: 39.6, priceBlended: 1.125, scores: { coding: 54.5, agentic: 0.614, ifbench: 0.752 }, tps: 52, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   // Z AI GLM
-  { key: "glm-5.2", aliases: ["glm-5p2"], intelligence: 51.1, priceBlended: 2.15, scores: { coding: 68.8, agentic: 0.779, ifbench: 0.733 }, tps: 104, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "balanced"], frontier: true, source: AA },
+  { key: "glm-5.2", aliases: ["glm-5p2"], intelligence: 51.086, priceBlended: 2.15, scores: { coding: 68.756, agentic: 0.431, ifbench: 0.733 }, tps: 191.105, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "balanced"], frontier: true, source: AA },
   { key: "glm-5.1", aliases: ["glm-5p1"], intelligence: 40.2, priceBlended: 2.15, scores: { coding: 55.8, agentic: 0.618, ifbench: 0.763 }, tps: 105, costTier: "standard", profiles: ["deep", "balanced"], frontier: false, source: AA },
   // Kimi (Moonshot)
-  { key: "kimi-k3", intelligence: 57.1, priceBlended: 6, scores: { coding: 76.2, agentic: 0.501 }, tps: 62, costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
+  { key: "kimi-k3", intelligence: 57.112, priceBlended: 6, scores: { coding: 76.239, agentic: 0.501 }, tps: 32.081, costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA_API },
   { key: "kimi-k2.7-code-highspeed", intelligence: 41.9, priceBlended: 1.712, scores: { coding: 60.8, agentic: 0.674, ifbench: 0.631 }, tps: 180, costTier: "premium", profiles: ["fast", "coder"], frontier: false, source: `${AA} (highspeed serving of kimi-k2.7-code)` },
   { key: "kimi-k2.7-code", aliases: ["kimi-k2p7-code"], intelligence: 41.9, priceBlended: 1.712, scores: { coding: 60.8, agentic: 0.674, ifbench: 0.631 }, tps: 53, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "kimi-k2.6", aliases: ["kimi-k2p6"], intelligence: 42.8, priceBlended: 1.712, scores: { coding: 56.0, agentic: 0.573, ifbench: 0.760 }, tps: 61, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   // MiniMax
-  { key: "minimax-m3", intelligence: 44.4, priceBlended: 0.525, scores: { coding: 58.6, agentic: 0.652, ifbench: 0.829 }, tps: 56, costTier: "standard", profiles: ["balanced", "coder"], frontier: false, source: AA },
+  { key: "minimax-m3", intelligence: 44.437, priceBlended: 0.525, scores: { coding: 58.569, agentic: 0.354, ifbench: 0.829 }, tps: 75.629, costTier: "standard", profiles: ["balanced", "coder"], frontier: false, source: AA },
   { key: "minimax-m2.7", intelligence: 38.1, priceBlended: 0.525, scores: { coding: 52.6, agentic: 0.554, ifbench: 0.757 }, tps: 48, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   // Xiaomi MiMo
-  { key: "mimo-v2.5-pro", intelligence: 42.2, priceBlended: 0.544, scores: { coding: 60.2, agentic: 0.652, ifbench: 0.799 }, tps: 51, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
+  { key: "mimo-v2.5-pro", intelligence: 42.239, priceBlended: 0.54375, scores: { coding: 60.190, agentic: 0.291, ifbench: 0.799 }, tps: 68.715, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   // Meta
-  { key: "muse-spark", intelligence: 43.1, priceBlended: 0, scores: { coding: 58.6, agentic: 0.622, ifbench: 0.759 }, tps: 60, costTier: "standard", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA },
+  { key: "muse-spark", aliases: ["muse-spark-1-1"], intelligence: 50.623, priceBlended: 2, scores: { coding: 71.341, agentic: 0.375, ifbench: 0.759 }, tps: 116.878, benchmarkEffort: "xhigh", costTier: "standard", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA },
   { key: "llama-4-maverick", intelligence: 14.3, priceBlended: 0.475, scores: { coding: 16.3, agentic: 0.0787, ifbench: 0.430 }, tps: 122, costTier: "cheap", profiles: ["fast", "balanced"], frontier: false, source: AA },
   // NVIDIA
-  { key: "nemotron-3-ultra", intelligence: 37.8, priceBlended: 1.175, scores: { coding: 49.3, agentic: 0.539, ifbench: 0.814 }, tps: 148, costTier: "standard", profiles: ["balanced"], frontier: false, source: AA },
+  { key: "nemotron-3-ultra", aliases: ["nvidia-nemotron-3-ultra-550b-a55b"], intelligence: 37.762, priceBlended: 1.175, scores: { coding: 49.265, agentic: 0.274, ifbench: 0.814 }, tps: 182.022, costTier: "standard", profiles: ["balanced"], frontier: false, source: AA },
 ];
 
 /**
- * Per-model/effort results from the Ramp SWE-Bench run (mini-swe-agent harness, 80 tasks): real agentic
+ * Per-model/effort results from the Ramp SWE-Bench run (mini-swe-agent harness, 79 tasks): real agentic
  * resolve-rate and measured per-task cost (API list pricing, prompt-cache included). This is a
  * SEPARATE source from the Artificial Analysis numbers above — the router consumes one or the other
  * (`capabilitySource`), never a merge: mixing real outcomes and synthetic scores on one scale is
@@ -117,9 +119,9 @@ export const CANONICAL_MODELS: CanonicalMeta[] = [
  * result and is therefore not auto-routed when `capabilitySource` is `ramp` (reach it via
  * `modelOverrides` or a forced route).
  *
- * Caveat: the current table has one published effort row per model, billed at API list (no
- * subscription), no vision and no throughput metric. It is a real-task coding slice, not a universal
- * capability score.
+ * Caveat: the current table has one published effort row per model across 79 tasks, billed at API
+ * list (no subscription), no vision and no throughput metric. It is a real-task coding slice, not a
+ * universal capability score.
  */
 export interface RampMeta {
   /** Canonical model key; matches a `CanonicalMeta.key` above. */
@@ -136,28 +138,29 @@ export interface RampMeta {
 }
 
 export const RAMP_MODELS: RampMeta[] = [
+  { key: "claude-opus-5", effort: "high", resolveRate: 87.3, costPerTask: 2.01, turns: 53, source: RAMP },
   { key: "claude-fable-5", effort: "xhigh", resolveRate: 87.3, costPerTask: 2.68, turns: 49, source: RAMP },
   { key: "gpt-5.5", effort: "high", resolveRate: 83.5, costPerTask: 1.82, turns: 52, source: RAMP },
   { key: "claude-opus-4-7", effort: "xhigh", resolveRate: 83.5, costPerTask: 2.25, turns: 71, source: RAMP },
-  { key: "gpt-5.6-sol", effort: "xhigh", resolveRate: 82.3, costPerTask: 1.01, turns: 44, source: RAMP },
+  { key: "gpt-5.6-sol", effort: "high", resolveRate: 82.3, costPerTask: 1.01, turns: 44, source: RAMP },
   { key: "grok-4.5", effort: "high", resolveRate: 81, costPerTask: 1.14, turns: 54, source: RAMP },
   { key: "glm-5.2", effort: "high", resolveRate: 81, costPerTask: 1.89, turns: 98, source: RAMP },
   { key: "kimi-k2.7-code", effort: "high", resolveRate: 79.7, costPerTask: 0.88, turns: 77, source: RAMP },
-  { key: "claude-opus-4-6", effort: "xhigh", resolveRate: 79.7, costPerTask: 1.47, turns: 58, source: RAMP },
+  { key: "claude-opus-4-6", effort: "high", resolveRate: 79.7, costPerTask: 1.47, turns: 58, source: RAMP },
   { key: "claude-opus-4-8", effort: "xhigh", resolveRate: 78.5, costPerTask: 1.08, turns: 39, source: RAMP },
-  { key: "gpt-5.6-terra", effort: "xhigh", resolveRate: 75.9, costPerTask: 0.33, turns: 29, source: RAMP },
+  { key: "gpt-5.6-terra", effort: "high", resolveRate: 75.9, costPerTask: 0.33, turns: 29, source: RAMP },
   { key: "gemini-3.1-pro", effort: "high", resolveRate: 74.7, costPerTask: 1.03, turns: 55, source: RAMP },
-  { key: "claude-sonnet-5", effort: "xhigh", resolveRate: 74.7, costPerTask: 1.22, turns: 49, source: RAMP },
-  { key: "gpt-5.6-luna", effort: "xhigh", resolveRate: 73.4, costPerTask: 0.22, turns: 37, source: RAMP },
+  { key: "claude-sonnet-5", effort: "medium", resolveRate: 74.7, costPerTask: 1.22, turns: 49, source: RAMP },
+  { key: "gpt-5.6-luna", effort: "high", resolveRate: 73.4, costPerTask: 0.22, turns: 37, source: RAMP },
   { key: "gpt-5.4", effort: "high", resolveRate: 73.4, costPerTask: 0.66, turns: 28, source: RAMP },
   { key: "kimi-k2.6", effort: "high", resolveRate: 73.4, costPerTask: 0.69, turns: 81, source: RAMP },
-  { key: "claude-sonnet-4-6", effort: "high", resolveRate: 72.2, costPerTask: 0.79, turns: 50, source: RAMP },
+  { key: "claude-sonnet-4-6", effort: "medium", resolveRate: 72.2, costPerTask: 0.79, turns: 50, source: RAMP },
   { key: "glm-5.1", effort: "high", resolveRate: 70.9, costPerTask: 1.08, turns: 77, source: RAMP },
   { key: "qwen3.6-plus", effort: "high", resolveRate: 65.8, costPerTask: 0.29, turns: 107, source: RAMP },
   { key: "deepseek-v4-pro", effort: "high", resolveRate: 65.8, costPerTask: 0.8, turns: 55, source: RAMP },
   { key: "qwen3.7-plus", effort: "high", resolveRate: 62, costPerTask: 0.15, turns: 53, source: RAMP },
   { key: "gpt-5.4-mini", effort: "high", resolveRate: 59.5, costPerTask: 0.23, turns: 29, source: RAMP },
-  { key: "gpt-5.4-nano", effort: "high", resolveRate: 49.4, costPerTask: 0.09, turns: 54, source: RAMP },
+  { key: "gpt-5.4-nano", effort: "medium", resolveRate: 49.4, costPerTask: 0.09, turns: 54, source: RAMP },
   { key: "claude-4-5-haiku", effort: "high", resolveRate: 49.4, costPerTask: 0.49, turns: 72, source: RAMP },
   { key: "gpt-4.1", effort: "high", resolveRate: 15.2, costPerTask: 1.52, turns: 95, source: RAMP },
 ];

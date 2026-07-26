@@ -262,9 +262,9 @@ describe("canonical model routing", () => {
     // GPT-5.6 is present in both tables; the active source still decides which numbers route.
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").supported).toBe(true);
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").intelligence).toBe(82.3);
-    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").benchmarkEffort).toBe("xhigh");
+    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").benchmarkEffort).toBe("high");
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").supported).toBe(true);
-    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").intelligence).toBe(58.9);
+    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").intelligence).toBeCloseTo(58.89, 2);
     expect(resolveCanonicalModel("gateway/kimi-k3", "aa").supported).toBe(true);
   });
 
@@ -395,7 +395,7 @@ describe("canonical model routing", () => {
     expect(decision.hardnessBucket).toBe(3);
     expect(decision.score).toBe(0.86);
     expect(decision.requestedProfile).toBe("fast");
-    expect(selectFromPool(decision, pool, request, undefined, AA)?.selected.canonicalKey).toBe("kimi-k2.7-code-highspeed");
+    expect(selectFromPool(decision, pool, request, undefined, AA)?.selected.canonicalKey).toBe("glm-5.2");
   });
 
   it("does not let stale classifier profiles affect forced tiers", () => {
