@@ -300,6 +300,13 @@ describe("canonical model routing", () => {
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").benchmarkEffort).toBe("high");
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").supported).toBe(true);
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").intelligence).toBeCloseTo(58.89, 2);
+    expect(resolveCanonicalModel("gateway/kimi-k3", "ramp")).toMatchObject({
+      supported: true,
+      intelligence: 86.1,
+      priceBlended: 1.63,
+      benchmarkEffort: "high",
+      capabilityMode: "ultra",
+    });
     expect(resolveCanonicalModel("gateway/kimi-k3", "aa").supported).toBe(true);
   });
 

@@ -140,6 +140,7 @@ export interface RampMeta {
 export const RAMP_MODELS: RampMeta[] = [
   { key: "claude-opus-5", effort: "high", resolveRate: 87.3, costPerTask: 2.01, turns: 53, source: RAMP },
   { key: "claude-fable-5", effort: "xhigh", resolveRate: 87.3, costPerTask: 2.68, turns: 49, source: RAMP },
+  { key: "kimi-k3", effort: "high", resolveRate: 86.1, costPerTask: 1.63, turns: 91, source: RAMP },
   { key: "gpt-5.5", effort: "high", resolveRate: 83.5, costPerTask: 1.82, turns: 52, source: RAMP },
   { key: "claude-opus-4-7", effort: "xhigh", resolveRate: 83.5, costPerTask: 2.25, turns: 71, source: RAMP },
   { key: "gpt-5.6-sol", effort: "high", resolveRate: 82.3, costPerTask: 1.01, turns: 44, source: RAMP },
