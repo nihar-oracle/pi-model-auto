@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - 2026-07-30
+
+### Changed
+
+- Added the Ramp SWE-Bench result for Kimi K3 at high effort: 86.1% resolve rate, $1.63 average cost per task, and 91 average tool-call turns. It is routed in the Ultra capability mode.
+
 ## 0.2.0 - 2026-07-26
 
 ### Breaking changes
