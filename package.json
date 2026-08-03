@@ -1,6 +1,6 @@
 {
   "name": "pi-model-auto",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Pi extension package that routes each turn by Low/Medium/High/Ultra capability modes.",
   "type": "module",
   "exports": {
