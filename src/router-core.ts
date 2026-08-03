@@ -411,9 +411,6 @@ export function normalizeModelKey(key: string): string {
   return withoutProvider.trim().replace(/\s*\((?:xhigh|high|medium|low|minimal|max)\)\s*$/i, "");
 }
 
-/** Resolve-rate at/above which a Ramp model is shown as a frontier candidate (display only). */
-const RAMP_FRONTIER_RESOLVE = 75;
-
 /** Map a Ramp solve rate (0–100) to the user-facing capability mode. */
 export function rampCapabilityMode(resolveRate: number): CapabilityMode {
   return capabilityModeForValue(resolveRate, RAMP_MODE_BOUNDS);
@@ -532,7 +529,7 @@ function rampResolution(canonical: CanonicalMeta, ramp: RampMeta): CanonicalReso
     costTier: rampCostTier(ramp.costPerTask),
     capabilityMode: rampCapabilityMode(ramp.resolveRate),
     profiles: canonical.profiles,
-    frontier: ramp.resolveRate >= RAMP_FRONTIER_RESOLVE,
+    frontier: ramp.scoreSpendWall === true,
     intelligence: ramp.resolveRate,
     priceBlended: ramp.costPerTask,
     scores,
@@ -983,6 +980,25 @@ function climbWithinMode(base: ResolvedModel, items: ResolvedModel[], willingnes
   return pick;
 }
 
+/**
+ * Prefer Ramp's published score-versus-spend wall only when its marginal capability remains inside
+ * the mode's economic budget. The user's filtered pool and effective prices run first, so a wall
+ * model that is unavailable or dominated under local economics never blocks a viable measured row.
+ */
+function preferRampScoreSpendWall(base: ResolvedModel, items: ResolvedModel[], willingness: number): ResolvedModel {
+  if (base.frontier) return base;
+  const wallUpgrades = items
+    .filter((item) => item.frontier && item.intelligence >= base.intelligence)
+    .sort((a, b) => a.intelligence - b.intelligence || a.priceBlended - b.priceBlended);
+
+  for (const item of wallUpgrades) {
+    const qualityGain = item.intelligence - base.intelligence;
+    const priceIncrease = item.priceBlended - base.priceBlended;
+    if (priceIncrease <= 0 || (qualityGain > 0 && priceIncrease / qualityGain <= willingness)) return item;
+  }
+  return base;
+}
+
 function nearestModeFallback(items: ResolvedModel[], targetMode: CapabilityMode): ResolvedModel | undefined {
   const targetRank = CAPABILITY_MODE_ORDER.indexOf(targetMode);
   const ranked = items
@@ -1043,10 +1059,14 @@ export function selectFromPool(
       a.priceBlended - b.priceBlended ||
       modelKey(a.model).localeCompare(modelKey(b.model)),
     )[0];
+    const preferredBase = cfg.capabilitySource === "ramp"
+      ? preferRampScoreSpendWall(base, sameMode, finiteWillingness(cfg, selectedMode))
+      : base;
     const willingness = finiteWillingness(cfg, selectedMode) * target.position;
-    const selected = climbWithinMode(base, sameMode, willingness);
+    const selected = climbWithinMode(preferredBase, sameMode, willingness);
     const axisLabel = cfg.capabilitySource === "aa" ? "AA floor" : "solve floor";
-    const reason = `${target.mode} ${axisLabel}≥${target.floor.toFixed(1)} w≤$${willingness.toFixed(3)}/pt → ${selected.intelligence.toFixed(1)}@$${selected.priceBlended}${overflowNote(overflow)}`;
+    const wallNote = preferredBase !== base ? " wall-priority" : "";
+    const reason = `${target.mode}${wallNote} ${axisLabel}≥${target.floor.toFixed(1)} w≤$${willingness.toFixed(3)}/pt → ${selected.intelligence.toFixed(1)}@$${selected.priceBlended}${overflowNote(overflow)}`;
     return buildSelection(selected, chain, profile, reason);
   }
 

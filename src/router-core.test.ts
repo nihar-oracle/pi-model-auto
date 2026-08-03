@@ -115,6 +115,7 @@ describe("canonical model routing", () => {
     const models = [
       model("gateway", "gpt-5.4-nano"),
       model("gateway", "qwen3.7-plus"),
+      model("gateway", "deepseek-v4-flash"),
       model("gateway", "kimi-k2.7-code"),
       model("gateway", "glm-5.2"),
       model("gateway-codex", "gpt-5.5"),
@@ -123,9 +124,9 @@ describe("canonical model routing", () => {
     expect(resolveRouteModel({ models, hint: "low", context: context("small task"), cfg: DEFAULT_CONFIG })?.key)
       .toBe("gateway/gpt-5.4-nano");
     expect(resolveRouteModel({ models, hint: "medium", context: context("small task"), cfg: DEFAULT_CONFIG })?.key)
-      .toBe("gateway/kimi-k2.7-code");
+      .toBe("gateway/deepseek-v4-flash");
     expect(resolveRouteModel({ models, hint: "high", context: context("small task"), cfg: DEFAULT_CONFIG })?.key)
-      .toBe("gateway-codex/gpt-5.5");
+      .toBe("gateway/kimi-k2.7-code");
     expect(resolveRouteModel({ models, hint: "ultra", context: context("small task"), cfg: DEFAULT_CONFIG })?.key)
       .toBe("anthropic/claude-fable-5");
     expect(resolveRouteModel({ models, hint: "cheap", context: context("small task"), cfg: DEFAULT_CONFIG })).toBeUndefined();
@@ -283,7 +284,7 @@ describe("canonical model routing", () => {
   it("draws capability numbers from the active source, never merged", () => {
     const ramp = resolveCanonicalModel("gateway/kimi-k2.7-code", "ramp");
     expect(ramp.supported).toBe(true);
-    expect(ramp.intelligence).toBe(79.7); // resolve-rate
+    expect(ramp.intelligence).toBe(80.8); // resolve-rate
     expect(ramp.priceBlended).toBe(0.88); // measured cost per task
 
     const aa = resolveCanonicalModel("gateway/kimi-k2.7-code", "aa");
@@ -296,18 +297,46 @@ describe("canonical model routing", () => {
 
     // GPT-5.6 is present in both tables; the active source still decides which numbers route.
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").supported).toBe(true);
-    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").intelligence).toBe(82.3);
+    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").intelligence).toBe(83.3);
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp").benchmarkEffort).toBe("high");
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").supported).toBe(true);
     expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "aa").intelligence).toBeCloseTo(58.89, 2);
     expect(resolveCanonicalModel("gateway/kimi-k3", "ramp")).toMatchObject({
       supported: true,
-      intelligence: 86.1,
-      priceBlended: 1.63,
+      intelligence: 87.2,
+      priceBlended: 1.6,
       benchmarkEffort: "high",
       capabilityMode: "ultra",
     });
     expect(resolveCanonicalModel("gateway/kimi-k3", "aa").supported).toBe(true);
+    expect(resolveCanonicalModel("gateway/deepseek-v4-flash", "ramp")).toMatchObject({
+      supported: true,
+      intelligence: 79.5,
+      priceBlended: 0.12,
+      benchmarkEffort: "high",
+      capabilityMode: "medium",
+    });
+  });
+
+  it("keeps full Ramp coverage separate from the highlighted score-spend wall", () => {
+    expect(resolveCanonicalModel("gateway/gpt-5.4", "ramp")).toMatchObject({
+      supported: true,
+      intelligence: 74.4,
+      capabilityMode: "low",
+      frontier: false,
+    });
+    expect(resolveCanonicalModel("gateway/gemini-3.1-pro", "ramp")).toMatchObject({
+      supported: true,
+      intelligence: 74.4,
+      capabilityMode: "low",
+      frontier: false,
+    });
+    expect(resolveCanonicalModel("gateway/kimi-k2.7-code", "ramp")).toMatchObject({
+      supported: true,
+      capabilityMode: "high",
+      frontier: false,
+    });
+    expect(resolveCanonicalModel("gateway/gpt-5.6-sol", "ramp")).toMatchObject({ frontier: true });
   });
 
   it("represents benchmark results as model-effort routing variants", () => {
@@ -531,6 +560,7 @@ describe("canonical model routing", () => {
       model("gateway", "qwen3.7-plus"),
       model("gateway", "qwen3.6-plus"),
       model("gateway-codex", "gpt-5.4"),
+      model("gateway", "deepseek-v4-flash"),
       model("gateway", "kimi-k2.7-code"),
       model("gateway-codex", "gpt-5.5"),
       model("anthropic", "claude-fable-5"),
@@ -540,9 +570,40 @@ describe("canonical model routing", () => {
 
     // The lower edge of each bucket picks the cheapest model meeting that mode's solve-rate floor.
     expect(pick(0)).toBe("gpt-5.4-nano");
-    expect(pick(1)).toBe("kimi-k2.7-code");
-    expect(pick(2)).toBe("gpt-5.5");
+    expect(pick(1)).toBe("deepseek-v4-flash");
+    expect(pick(2)).toBe("kimi-k2.7-code");
     expect(pick(3)).toBe("claude-fable-5");
+  });
+
+  it("prefers an affordable Ramp wall point but preserves local fallbacks", () => {
+    const coder = context("implement a typescript helper");
+    const decision = { cls: "high" as const, score: 0.52, chosen: "", modeBucket: 2, requestedProfile: "coder" as const };
+    const pick = (models: Model<Api>[], cfg: RouterConfig = DEFAULT_CONFIG) => selectFromPool(
+      decision,
+      buildAutoPool(models, cfg),
+      coder,
+      undefined,
+      cfg,
+    )?.selected.canonicalKey;
+
+    const both = [model("gateway", "kimi-k2.7-code"), model("gateway", "gpt-5.6-sol")];
+    expect(pick(both)).toBe("gpt-5.6-sol");
+    expect(pick([model("gateway", "kimi-k2.7-code")])).toBe("kimi-k2.7-code");
+
+    const localEconomics = {
+      ...DEFAULT_CONFIG,
+      modelOverrides: { "gateway/kimi-k2.7-code": { costCoef: 0.1 } },
+    };
+    expect(pick(both, localEconomics)).toBe("kimi-k2.7-code");
+
+    const ultraBase = selectFromPool(
+      { cls: "ultra", score: 0.74, chosen: "", modeBucket: 3, requestedProfile: "coder" },
+      buildAutoPool([model("gateway", "kimi-k3"), model("gateway", "claude-opus-5")]),
+      coder,
+      undefined,
+      DEFAULT_CONFIG,
+    );
+    expect(ultraBase?.selected.canonicalKey).toBe("kimi-k3");
   });
 
   it("selects the cheapest model meeting the continuous floor inside a Ramp mode", () => {
@@ -569,15 +630,15 @@ describe("canonical model routing", () => {
     )?.selected.canonicalKey;
 
     expect(pick(0.52)).toBe("glm-5.2");
-    expect(pick(0.58)).toBe("gpt-5.6-sol");
-    expect(pick(0.63)).toBe("gpt-5.5");
+    expect(pick(0.58)).toBe("glm-5.2");
+    expect(pick(0.63)).toBe("gpt-5.6-sol");
   });
 
   it("allows an affordable willingness upgrade only within the selected Ramp mode", () => {
     const cfg: RouterConfig = {
       ...DEFAULT_CONFIG,
       modelOverrides: {
-        "gateway/glm-5.2": { costCoef: 0.35 },
+        "gateway/glm-5.2": { costCoef: 0.52 },
         "gateway-codex/gpt-5.5": { costCoef: 0.6 },
       },
     };
@@ -596,7 +657,7 @@ describe("canonical model routing", () => {
       cfg,
     );
 
-    expect(selection?.selected.canonicalKey).toBe("gpt-5.5");
+    expect(selection?.selected.canonicalKey).toBe("gpt-5.6-sol");
     expect(selection?.selected.capabilityMode).toBe("high");
   });
 
@@ -674,17 +735,17 @@ describe("canonical model routing", () => {
   });
 
   it("scales the cost axis by the shadow-price coefficient", () => {
-    expect(item(buildAutoPool([model("gateway", "glm-5.2")]), "glm-5.2").priceBlended).toBe(1.89);
+    expect(item(buildAutoPool([model("gateway", "glm-5.2")]), "glm-5.2").priceBlended).toBe(1.84);
 
     const discounted = buildAutoPool([model("gateway", "glm-5.2")], {
       ...DEFAULT_CONFIG,
       modelOverrides: { "gateway/glm-5.2": { costCoef: 0.25 } },
     });
-    expect(item(discounted, "glm-5.2").priceBlended).toBeCloseTo(0.47);
+    expect(item(discounted, "glm-5.2").priceBlended).toBeCloseTo(0.46);
   });
 
   it("lets a paid subscription win Low turns it would lose at measured cost", () => {
-    // gpt-5.4 (73.4@$0.66) vs glm-5.2 (81@$1.89): at list cost an easy coder turn takes the cheap gpt-5.4.
+    // gpt-5.4 (74.4@$0.64) vs glm-5.2 (82.1@$1.84): at list cost an easy coder turn takes the cheap gpt-5.4.
     const models = [model("gateway-codex", "gpt-5.4"), model("gateway", "glm-5.2")];
     const coder = context("implement a typescript helper");
     const pick = (cfg: RouterConfig) =>
@@ -692,7 +753,7 @@ describe("canonical model routing", () => {
 
     expect(pick(DEFAULT_CONFIG)).toBe("gpt-5.4");
 
-    // Price GLM as an already-paid subscription (coef 0.2 → $0.376): now it dominates and wins.
+    // Price GLM as an already-paid subscription (coef 0.2 → $0.368): now it dominates and wins.
     const withSub: RouterConfig = { ...DEFAULT_CONFIG, modelOverrides: { "gateway/glm-5.2": { costCoef: 0.2 } } };
     expect(pick(withSub)).toBe("glm-5.2");
   });
@@ -704,11 +765,11 @@ describe("canonical model routing", () => {
     };
     // Build is time-neutral: base coef only, no clock baked in.
     const pool = buildAutoPool([model("gateway", "glm-5.2")], cfg);
-    expect(item(pool, "glm-5.2").priceBlended).toBeCloseTo(1.89 * 0.2);
+    expect(item(pool, "glm-5.2").priceBlended).toBeCloseTo(1.84 * 0.2);
 
     // Per-turn reprice applies the window without rebuilding: 10:00 off-peak, 15:00 inside the 3× window.
-    expect(item(repriceForTimeOfDay(pool, 10), "glm-5.2").priceBlended).toBeCloseTo(1.89 * 0.2);
-    expect(item(repriceForTimeOfDay(pool, 15), "glm-5.2").priceBlended).toBeCloseTo(1.89 * 0.6);
+    expect(item(repriceForTimeOfDay(pool, 10), "glm-5.2").priceBlended).toBeCloseTo(1.84 * 0.2);
+    expect(item(repriceForTimeOfDay(pool, 15), "glm-5.2").priceBlended).toBeCloseTo(1.84 * 0.6);
   });
 
   it("uses time-of-day effective cost inside the selected Ramp mode", () => {

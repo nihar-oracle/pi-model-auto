@@ -41,7 +41,7 @@ export interface CanonicalMeta {
 
 const AA = "Artificial Analysis, 2026-07";
 const AA_API = "Artificial Analysis Data API, 2026-07";
-const RAMP = "Ramp SWE-Bench (mini-swe-agent), 2026-07";
+const RAMP = "Ramp SWE-Bench (mini-swe-agent), 2026-08";
 
 /**
  * Curated frontier + recent-two-generation models across major labs. Most rows are AA-backed; a few
@@ -64,14 +64,14 @@ export const CANONICAL_MODELS: CanonicalMeta[] = [
   { key: "gpt-5.4-mini", intelligence: 40.0, priceBlended: 1.688, scores: { coding: 56.1, agentic: 0.592, ifbench: 0.733 }, tps: 202, costTier: "standard", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "gpt-5.4-nano", intelligence: 38.2, priceBlended: 0.463, scores: { coding: 56.1, agentic: 0.607, ifbench: 0.759 }, tps: 168, costTier: "cheap", profiles: ["coder", "fast"], frontier: false, source: AA },
   { key: "gpt-5.3-codex-spark", intelligence: 44.3, priceBlended: 4.813, scores: { coding: 62.0, agentic: 0.62, ifbench: 0.754 }, tps: 130, costTier: "standard", profiles: ["coder", "fast"], frontier: false, source: `${AA} (coding/agentic estimated)` },
-  { key: "gpt-4.1", intelligence: 15.2, priceBlended: 1.52, scores: { coding: 15.2, agentic: 0.152 }, costTier: "premium", profiles: ["balanced"], frontier: false, source: RAMP },
+  { key: "gpt-4.1", intelligence: 15.4, priceBlended: 1.53, scores: { coding: 15.4, agentic: 0.154 }, costTier: "premium", profiles: ["balanced"], frontier: false, source: RAMP },
   { key: "gpt-oss-120b", intelligence: 23.831, priceBlended: 0.2625, scores: { coding: 30.441, agentic: 0.132 }, tps: 273.314, costTier: "cheap", profiles: ["balanced"], frontier: false, source: AA },
   // Anthropic
   { key: "claude-opus-5", intelligence: 60.692, priceBlended: 10, scores: { coding: 77.983, agentic: 0.553 }, tps: 52.562, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "claude-fable-5", intelligence: 59.861, priceBlended: 20, scores: { coding: 76.491, agentic: 0.528, ifbench: 0.635 }, tps: 71.392, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "claude-opus-4-8", intelligence: 55.692, priceBlended: 10, scores: { coding: 74.254, agentic: 0.472, ifbench: 0.622 }, tps: 56.048, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: AA },
   { key: "claude-opus-4-7", intelligence: 53.5, priceBlended: 10, scores: { coding: 73.6, agentic: 0.831, ifbench: 0.586 }, tps: 58, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["deep", "coder", "balanced"], frontier: false, source: AA },
-  { key: "claude-opus-4-6", intelligence: 79.7, priceBlended: 1.47, scores: { coding: 79.7, agentic: 0.797 }, costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: RAMP },
+  { key: "claude-opus-4-6", intelligence: 80.8, priceBlended: 1.41, scores: { coding: 80.8, agentic: 0.808 }, costTier: "premium", profiles: ["deep", "coder", "balanced", "frontier"], frontier: true, source: RAMP },
   { key: "claude-sonnet-5", intelligence: 53.350, priceBlended: 4, scores: { coding: 71.546, agentic: 0.467 }, tps: 76.061, benchmarkEffort: "xhigh", costTier: "premium", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "claude-sonnet-4-6", intelligence: 47.2, priceBlended: 6, scores: { coding: 63.0, agentic: 0.712, ifbench: 0.566 }, tps: 69, costTier: "premium", profiles: ["coder", "balanced"], frontier: false, source: AA },
   { key: "claude-4-5-haiku", aliases: ["claude-haiku-4-5"], intelligence: 29.576, priceBlended: 2, scores: { coding: 43.892, agentic: 0.164, ifbench: 0.543 }, tps: 92.337, benchmarkEffort: "xhigh", costTier: "standard", profiles: ["fast", "balanced"], frontier: false, source: AA },
@@ -111,7 +111,7 @@ export const CANONICAL_MODELS: CanonicalMeta[] = [
 ];
 
 /**
- * Per-model/effort results from the Ramp SWE-Bench run (mini-swe-agent harness, 79 tasks): real agentic
+ * Per-model/effort results from the Ramp SWE-Bench run (mini-swe-agent harness, 78 tasks): real agentic
  * resolve-rate and measured per-task cost (API list pricing, prompt-cache included). This is a
  * SEPARATE source from the Artificial Analysis numbers above — the router consumes one or the other
  * (`capabilitySource`), never a merge: mixing real outcomes and synthetic scores on one scale is
@@ -119,7 +119,7 @@ export const CANONICAL_MODELS: CanonicalMeta[] = [
  * result and is therefore not auto-routed when `capabilitySource` is `ramp` (reach it via
  * `modelOverrides` or a forced route).
  *
- * Caveat: the current table has one published effort row per model across 79 tasks, billed at API
+ * Caveat: the current table has one published effort row per model across 78 tasks, billed at API
  * list (no subscription), no vision and no throughput metric. It is a real-task coding slice, not a
  * universal capability score.
  */
@@ -134,36 +134,39 @@ export interface RampMeta {
   costPerTask: number;
   /** Mean tool-call turns to complete. Informational (shown in `/router`). */
   turns: number;
+  /** Whether Ramp's default score-versus-spend view places this row on its highlighted Pareto wall. */
+  scoreSpendWall?: boolean;
   source: string;
 }
 
 export const RAMP_MODELS: RampMeta[] = [
-  { key: "claude-opus-5", effort: "high", resolveRate: 87.3, costPerTask: 2.01, turns: 53, source: RAMP },
-  { key: "claude-fable-5", effort: "xhigh", resolveRate: 87.3, costPerTask: 2.68, turns: 49, source: RAMP },
-  { key: "kimi-k3", effort: "high", resolveRate: 86.1, costPerTask: 1.63, turns: 91, source: RAMP },
-  { key: "gpt-5.5", effort: "high", resolveRate: 83.5, costPerTask: 1.82, turns: 52, source: RAMP },
-  { key: "claude-opus-4-7", effort: "xhigh", resolveRate: 83.5, costPerTask: 2.25, turns: 71, source: RAMP },
-  { key: "gpt-5.6-sol", effort: "high", resolveRate: 82.3, costPerTask: 1.01, turns: 44, source: RAMP },
-  { key: "grok-4.5", effort: "high", resolveRate: 81, costPerTask: 1.14, turns: 54, source: RAMP },
-  { key: "glm-5.2", effort: "high", resolveRate: 81, costPerTask: 1.89, turns: 98, source: RAMP },
-  { key: "kimi-k2.7-code", effort: "high", resolveRate: 79.7, costPerTask: 0.88, turns: 77, source: RAMP },
-  { key: "claude-opus-4-6", effort: "high", resolveRate: 79.7, costPerTask: 1.47, turns: 58, source: RAMP },
-  { key: "claude-opus-4-8", effort: "xhigh", resolveRate: 78.5, costPerTask: 1.08, turns: 39, source: RAMP },
-  { key: "gpt-5.6-terra", effort: "high", resolveRate: 75.9, costPerTask: 0.33, turns: 29, source: RAMP },
-  { key: "gemini-3.1-pro", effort: "high", resolveRate: 74.7, costPerTask: 1.03, turns: 55, source: RAMP },
-  { key: "claude-sonnet-5", effort: "medium", resolveRate: 74.7, costPerTask: 1.22, turns: 49, source: RAMP },
-  { key: "gpt-5.6-luna", effort: "high", resolveRate: 73.4, costPerTask: 0.22, turns: 37, source: RAMP },
-  { key: "gpt-5.4", effort: "high", resolveRate: 73.4, costPerTask: 0.66, turns: 28, source: RAMP },
-  { key: "kimi-k2.6", effort: "high", resolveRate: 73.4, costPerTask: 0.69, turns: 81, source: RAMP },
-  { key: "claude-sonnet-4-6", effort: "medium", resolveRate: 72.2, costPerTask: 0.79, turns: 50, source: RAMP },
-  { key: "glm-5.1", effort: "high", resolveRate: 70.9, costPerTask: 1.08, turns: 77, source: RAMP },
-  { key: "qwen3.6-plus", effort: "high", resolveRate: 65.8, costPerTask: 0.29, turns: 107, source: RAMP },
-  { key: "deepseek-v4-pro", effort: "high", resolveRate: 65.8, costPerTask: 0.8, turns: 55, source: RAMP },
-  { key: "qwen3.7-plus", effort: "high", resolveRate: 62, costPerTask: 0.15, turns: 53, source: RAMP },
-  { key: "gpt-5.4-mini", effort: "high", resolveRate: 59.5, costPerTask: 0.23, turns: 29, source: RAMP },
-  { key: "gpt-5.4-nano", effort: "medium", resolveRate: 49.4, costPerTask: 0.09, turns: 54, source: RAMP },
-  { key: "claude-4-5-haiku", effort: "high", resolveRate: 49.4, costPerTask: 0.49, turns: 72, source: RAMP },
-  { key: "gpt-4.1", effort: "high", resolveRate: 15.2, costPerTask: 1.52, turns: 95, source: RAMP },
+  { key: "claude-opus-5", effort: "high", resolveRate: 88.5, costPerTask: 1.84, turns: 52, scoreSpendWall: true, source: RAMP },
+  { key: "claude-fable-5", effort: "xhigh", resolveRate: 88.5, costPerTask: 2.62, turns: 48, source: RAMP },
+  { key: "kimi-k3", effort: "high", resolveRate: 87.2, costPerTask: 1.6, turns: 91, scoreSpendWall: true, source: RAMP },
+  { key: "gpt-5.5", effort: "high", resolveRate: 83.3, costPerTask: 1.83, turns: 52, source: RAMP },
+  { key: "claude-opus-4-7", effort: "xhigh", resolveRate: 83.3, costPerTask: 2.26, turns: 71, source: RAMP },
+  { key: "gpt-5.6-sol", effort: "high", resolveRate: 83.3, costPerTask: 0.99, turns: 44, scoreSpendWall: true, source: RAMP },
+  { key: "grok-4.5", effort: "high", resolveRate: 82.1, costPerTask: 1.09, turns: 54, source: RAMP },
+  { key: "glm-5.2", effort: "high", resolveRate: 82.1, costPerTask: 1.84, turns: 96, source: RAMP },
+  { key: "kimi-k2.7-code", effort: "high", resolveRate: 80.8, costPerTask: 0.88, turns: 77, source: RAMP },
+  { key: "claude-opus-4-6", effort: "high", resolveRate: 80.8, costPerTask: 1.41, turns: 57, source: RAMP },
+  { key: "deepseek-v4-flash", effort: "high", resolveRate: 79.5, costPerTask: 0.12, turns: 92, scoreSpendWall: true, source: RAMP },
+  { key: "claude-opus-4-8", effort: "xhigh", resolveRate: 78.2, costPerTask: 1.09, turns: 39, source: RAMP },
+  { key: "gpt-5.6-terra", effort: "high", resolveRate: 76.9, costPerTask: 0.26, turns: 29, source: RAMP },
+  { key: "claude-sonnet-5", effort: "medium", resolveRate: 75.6, costPerTask: 1.19, turns: 49, source: RAMP },
+  { key: "gemini-3.1-pro", effort: "high", resolveRate: 74.4, costPerTask: 1.03, turns: 55, source: RAMP },
+  { key: "gpt-5.6-luna", effort: "high", resolveRate: 74.4, costPerTask: 0.04, turns: 36, scoreSpendWall: true, source: RAMP },
+  { key: "gpt-5.4", effort: "high", resolveRate: 74.4, costPerTask: 0.64, turns: 28, source: RAMP },
+  { key: "claude-sonnet-4-6", effort: "medium", resolveRate: 73.1, costPerTask: 0.72, turns: 48, source: RAMP },
+  { key: "kimi-k2.6", effort: "high", resolveRate: 73.1, costPerTask: 0.69, turns: 81, source: RAMP },
+  { key: "glm-5.1", effort: "high", resolveRate: 70.5, costPerTask: 1.08, turns: 77, source: RAMP },
+  { key: "qwen3.6-plus", effort: "high", resolveRate: 66.7, costPerTask: 0.29, turns: 105, source: RAMP },
+  { key: "deepseek-v4-pro", effort: "high", resolveRate: 65.4, costPerTask: 0.81, turns: 55, source: RAMP },
+  { key: "qwen3.7-plus", effort: "high", resolveRate: 62.8, costPerTask: 0.15, turns: 53, source: RAMP },
+  { key: "gpt-5.4-mini", effort: "high", resolveRate: 60.3, costPerTask: 0.22, turns: 29, source: RAMP },
+  { key: "gpt-5.4-nano", effort: "medium", resolveRate: 50, costPerTask: 0.09, turns: 54, source: RAMP },
+  { key: "claude-4-5-haiku", effort: "high", resolveRate: 50, costPerTask: 0.49, turns: 72, source: RAMP },
+  { key: "gpt-4.1", effort: "high", resolveRate: 15.4, costPerTask: 1.53, turns: 96, source: RAMP },
 ];
 
 const RAMP_BY_KEY = new Map<string, RampMeta[]>();

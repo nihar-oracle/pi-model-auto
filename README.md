@@ -130,6 +130,8 @@ Quality comes from one benchmark table. Cost starts from the same table, then ap
 
 The numeric tables live in [`src/canonical-models.ts`](src/canonical-models.ts). The two sources are not mixed.
 
+The bundled Ramp table keeps every measured row because users rarely have identical model access. Routing first filters that table to the locally available, authenticated, quota-eligible models and recomputes the Pareto frontier with effective `costCoef` pricing. Models on Ramp's highlighted score-versus-spend wall receive priority only when their marginal capability gain remains within the selected mode's willingness budget; otherwise the router keeps the locally better fallback.
+
 The user-facing status label is a capability mode. Cost is a separate routing axis and never determines this label.
 
 For the Ramp source, the mode is derived only from SWE-bench solve rate:
@@ -138,8 +140,8 @@ For the Ramp source, the mode is derived only from SWE-bench solve rate:
 | --- | --- | --- |
 | `Ultra` | `>= 85%` | `claude-opus-5`, `claude-fable-5`, `kimi-k3` |
 | `High` | `80–85%` | `gpt-5.5`, `gpt-5.6-sol`, `grok-4.5`, `glm-5.2` |
-| `Medium` | `75–80%` | `kimi-k2.7-code`, `claude-opus-4-8`, `gpt-5.6-terra` |
-| `Low` | `< 75%` | `gemini-3.1-pro`, `claude-sonnet-5`, `gpt-5.4`, `gpt-5.4-nano` |
+| `Medium` | `75–80%` | `deepseek-v4-flash`, `claude-opus-4-8`, `gpt-5.6-terra`, `claude-sonnet-5` |
+| `Low` | `< 75%` | `gpt-5.4-nano`, `qwen3.7-plus`, `gpt-5.6-luna`, `gemini-3.1-pro` |
 
 For the AA source, the same four modes are mapped from Artificial Analysis Intelligence Index bands:
 
