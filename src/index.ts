@@ -108,6 +108,8 @@ interface LastDecision extends Decision {
   alternatives: string[];
   cacheReason?: CacheReason;
 }
+type RouterSessionKey = `${string}\0${string}`;
+
 
 interface RouterSessionState {
   ctx: ExtensionContext;
@@ -124,7 +126,9 @@ interface RouterSessionState {
 }
 
 export default function modelRouter(pi: ExtensionAPI) {
-  const sessions = new Map<string, RouterSessionState>();
+  const sessions = new Map<RouterSessionKey, RouterSessionState>();
+  const sessionKeysById = new Map<string, RouterSessionKey>();
+  let memorySessionSequence = 0;
   let routerContextWindow: number | undefined;
   const autocompleteContexts = new WeakSet<object>();
 
@@ -149,6 +153,8 @@ export default function modelRouter(pi: ExtensionAPI) {
     const cliForcedRoute = typeof cliRoute === "string" ? parseRouteHint(cliRoute) : undefined;
     const quota = new QuotaState(cfg.quota);
     quota.load(quotaStateFile());
+    const sessionId = ctx.sessionManager.getSessionId();
+    const key = routerSessionKey(ctx, ++memorySessionSequence);
     const state: RouterSessionState = {
       ctx,
       cfg,
@@ -160,7 +166,10 @@ export default function modelRouter(pi: ExtensionAPI) {
       classifierState: createClassifierState(),
       localClassifierErrorShown: false,
     };
-    sessions.set(ctx.sessionManager.getSessionId(), state);
+    const previousKey = sessionKeysById.get(sessionId);
+    if (previousKey) sessions.delete(previousKey);
+    sessions.set(key, state);
+    sessionKeysById.set(sessionId, key);
     if (!autocompleteContexts.has(ctx)) {
       autocompleteContexts.add(ctx);
       ctx.ui.addAutocompleteProvider((current) => ({
@@ -557,14 +566,25 @@ export default function modelRouter(pi: ExtensionAPI) {
 
   function sessionState(ctx: ExtensionContext): RouterSessionState {
     const sessionId = ctx.sessionManager.getSessionId();
-    const state = sessions.get(sessionId);
+    const state = sessionStateById(sessionId);
     if (!state) throw new Error(`Pi Router: session state not initialized: ${sessionId}`);
     return state;
   }
 
+  function sessionStateById(sessionId: string): RouterSessionState | undefined {
+    const key = sessionKeysById.get(sessionId);
+    return key ? sessions.get(key) : undefined;
+  }
+
+  function routerSessionKey(ctx: ExtensionContext, memorySequence: number): RouterSessionKey {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const sessionFile = ctx.sessionManager.getSessionFile?.();
+    return `${sessionId}\0${sessionFile ?? `memory:${memorySequence}`}`;
+  }
+
   function streamSessionState(context: Context, options: SimpleStreamOptions | undefined): RouterSessionState {
     if (options?.sessionId) {
-      const state = sessions.get(options.sessionId);
+      const state = sessionStateById(options.sessionId);
       if (state) return state;
     }
 
