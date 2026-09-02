@@ -156,20 +156,36 @@ Representative models are examples from the bundled benchmark tables, not requir
 
 Task difficulty chooses the mode, while the continuous difficulty score sets a capability floor inside that mode. The router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. Models without capability-mode metadata retain Pareto routing.
 
-Task difficulty is judged from language-neutral signals: context size, prompt length, and recent tool activity. In automatic routing, benchmark-backed effort is selected with the model and takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
+Task difficulty is judged by a local semantic classifier by default. In automatic routing, benchmark-backed effort is selected with the model and takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
 
-By default, the router uses only the local heuristic and makes no extra classifier model call. You can opt in to a small current-turn LLM classifier by setting `classifierModel`.
+The classifier runs locally and makes no provider call.
 
 ### Classifier and Coarse Auto Detection
 
-Automatic routing has two layers:
+The default classifier is a pinned, quantized
+[`anasnassar/llm-query-complexity-classifier`](https://huggingface.co/anasnassar/llm-query-complexity-classifier)
+ModernBERT model. Installation downloads the 143.6 MiB ONNX model and tokenizer from this fork's
+`classifier-v1` release, verifies fixed SHA-256 checksums, and fails the install on any mismatch.
+Inference disables remote model loading.
 
-1. **Local heuristic, always available.** It computes a rough difficulty score from language-neutral signals: estimated context size, current prompt length, and recent tool-result density. This is free, deterministic, and private, but intentionally coarse; it cannot deeply understand whether a short request is semantically hard.
-2. **Bounded LLM classifier, opt-in.** It runs only after you configure `classifierModel` with an exact model id. For auto routing, the router first makes a local draft decision. It runs the classifier for the current turn only when there is no previous route yet, or when that draft decision would switch away from the previous/warm model. Forced `@low`/`@medium`/`@high`/`@ultra`/`@model:...` turns and tool-call continuations do not run the classifier.
+Only the latest user message is classified. The model is warmed when the Pi session starts and input
+is capped at the upstream training length of 128 tokens. Its `LOW`, `MEDIUM`, and `HIGH` labels map
+directly to the router's `low`, `medium`, and `high` modes; it never guesses `ultra`. Image turns route
+to `high`, and predictions below the training-calibrated 0.45 confidence floor fail upward to `high`.
+Forced first-turn pins and tool-call continuations do not run another classification.
 
-#### Local heuristic, no LLM
+On the pinned 1,200-query public
+[`llm-query-complexity-benchmark`](https://huggingface.co/datasets/anasnassar/llm-query-complexity-benchmark)
+test split, the local classifier measured 0.591 macro-F1, 59.6% accuracy, 63.8% High recall, and 4.0%
+severe under-routing on an Apple M1 Pro. Short-query steady-state latency measured 20.1 ms p50 and
+72.0 ms p95; model loading measured 616.6 ms. On LLMRouterBench LiveCodeBench, routing between
+DeepSeek V3.1 Terminus and GPT-5 raised accuracy from 67.3% for the heuristic/weak baseline to 76.8%,
+while using GPT-5 for 48.0% of prompts. Long coding-prompt classifier latency measured 81.9 ms p50 and
+182.3 ms p95. These are local measurements, not upstream claims.
 
-When the classifier is disabled or skipped, the router computes:
+#### Heuristic fallback
+
+Set `"classifier": "off"` to disable semantic classification. The fallback score remains:
 
 ```text
 score = normalize(estimatedContextTokens, 8_000, 120_000) * weights.contextTokens
@@ -177,92 +193,9 @@ score = normalize(estimatedContextTokens, 8_000, 120_000) * weights.contextToken
       + min(1, recentToolResults / 8) * weights.toolDensity
 ```
 
-Default weights are:
-
-```jsonc
-{
-  "weights": {
-    "contextTokens": 0.3,
-    "lastUserLen": 0.5,
-    "toolDensity": 0.2
-  }
-}
-```
-
-The score maps to mode buckets:
-
-| score | mode |
-| --- | --- |
-| `< 0.30` | `low` |
-| `0.30–0.52` | `medium` |
-| `0.52–0.74` | `high` |
-| `>= 0.74` | `ultra` |
-
-This is deliberately language-neutral: it does not look for English keywords. It mostly asks, "how much context, how much prompt, how much recent tool activity?" That makes it cheap and predictable, but it can under-classify short, high-risk requests.
-
-#### LLM classifier prompt
-
-If the bounded classifier runs, it receives the following system prompt:
-
-```text
-You are Pi Router's classifier. Classify the current user turn for model routing.
-Return exactly one line and no prose: mode=<low|medium|high|ultra> profile=<balanced|coder|deep|fast|vision> score=<0..1>.
-Mode is required capability, not cost. Cost is handled later by the router.
-Mode rubric:
-- low: trivial, explain, summarize, docs/copy edits, tiny localized change, low ambiguity.
-- medium: routine coding/debugging/refactor, small scoped implementation, ordinary tests, a few files.
-- high: multi-file work, failing tests, unknown root cause, API/design decisions, non-trivial tool use, sizeable context.
-- ultra: architecture/security/migrations, production-risk changes, large refactor, long-horizon investigation, high ambiguity or high cost of failure.
-Profile rubric:
-- vision if hasImage=true.
-- fast only when the user explicitly prioritizes speed/latency or the task is a simple transform.
-- coder for implementation, debugging, refactoring, tests, or code review.
-- deep for architecture, root-cause analysis, security, planning, or long-horizon reasoning.
-- balanced otherwise.
-Score is position inside the chosen mode: low 0.00-0.29, medium 0.30-0.51, high 0.52-0.73, ultra 0.74-1.00.
-If uncertain between adjacent modes, choose the lower mode unless the task is risky, irreversible, security-sensitive, or explicitly asks for deep investigation.
-```
-
-The classifier model receives only this user payload:
-
-```text
-estimatedContextTokens=<local estimate>
-hasImage=<true|false>
-lastUserMessage:
-<the latest user message>
-```
-
-It does **not** receive the full conversation history. The full session is only inspected locally to estimate token count, count recent tool results, and detect whether images exist.
-
-The classifier returns the same `low` / `medium` / `high` / `ultra` vocabulary users see in the UI. The optional `score` positions the request inside that mode's capability floor; the classifier does not directly choose a model.
-
-#### Classifier cost controls
-
-Classifier cost is bounded in several ways:
-
-- The classifier prompt omits prior assistant/user turns and tool output bodies.
-- Output is capped at `maxTokens: 80`.
-- It uses `temperature: 0`, `reasoning: minimal` when the model supports reasoning, the configured timeout, and no internal retries.
-- It is gated by the local draft decision: after the first auto turn, if the draft keeps the previous/warm model, no classifier call is made.
-- Tool-call continuations reuse the same turn route and do not run extra classifier calls.
-- Forced first-turn pins (`@low`/`@medium`/`@high`/`@ultra`/`@model:...`) do not run the classifier.
-- If the classifier output cannot be parsed or the model fails repeatedly, that classifier model is temporarily disabled and routing falls back to the local heuristic / other classifier candidates.
-
-#### Choosing whether to use the classifier
-
-The classifier is off by default. To enable semantic classification, pin it to an exact endpoint:
-
-```jsonc
-{
-  "router": {
-    "classifierModel": "gateway/gpt-5.4-nano"
-  }
-}
-```
-
-Use the exact `provider/model` id from your Pi registry. If you want a Low-mode classifier, pick a model that is actually available locally and falls in Low for your active `capabilitySource`; for example, with the default Ramp source, `gpt-5.4-nano`, `qwen3.7-plus`, or another local Low model can be good candidates. `classifierModel` is an exact pin, not a mode name: use `"gateway/gpt-5.4-nano"`, not `"low"`.
-
-You can still force it off explicitly, even if a shared config sets a classifier model:
+It maps `< 0.30` to `low`, `0.30–0.52` to `medium`, `0.52–0.74` to `high`, and `>= 0.74` to
+`ultra`. This fallback is deterministic and free, but it cannot recognize semantically hard short
+requests.
 
 ```jsonc
 {
@@ -272,13 +205,26 @@ You can still force it off explicitly, even if a shared config sets a classifier
 }
 ```
 
-Trade-offs:
+#### Optional LLM classifier
 
-- **Default / classifier off:** no extra model call; routing relies only on local context size, prompt length, and recent tool activity.
-- **Pinned low-cost classifier:** predictable and cheap, but may miss subtle hard requests.
-- **Pinned stronger classifier:** may classify hard/ambiguous work better, but adds cost and is usually unnecessary because the main route still has local heuristics, manual first-turn mode pins, and cache-aware routing.
+To replace local inference with the existing bounded LLM classifier, pin an exact endpoint:
 
-One user turn keeps one model, including tool-call continuations. Automatic routing also avoids quota-cooled plans and avoids switching away from a useful warm cache when the switch is not worth it.
+```jsonc
+{
+  "router": {
+    "classifier": "llm",
+    "classifierModel": "gateway/gpt-5.4-nano"
+  }
+}
+```
+
+`classifierModel` also selects the LLM strategy when `classifier` is omitted. The LLM receives only
+the estimated context size, image flag, and latest user message; output is capped at 80 tokens with
+temperature 0, no internal retry, and the configured timeout. Repeated failures trigger its existing
+cooldown and heuristic fallback.
+
+One user turn keeps one model, including tool-call continuations. Automatic routing also avoids
+quota-cooled plans and avoids switching away from a useful warm cache when the switch is not worth it.
 
 ### Context Window and Compaction
 
@@ -297,8 +243,8 @@ As a result, a turn routed to a 272K model displays and compacts against 272K; a
 | `willingness` | Control affordable same-mode upgrades after a capability mode is selected. |
 | `cacheAware` | Keep warm prompt caches when switching is not worth it. Enabled by default. |
 | `quota` | Skip cooled-down plans after rate-limit headers or `429`. Enabled by default. |
-| `classifier` | Tune or explicitly disable the bounded LLM classifier. Use `"off"` to disable. |
-| `classifierModel` | Opt in to the classifier by pinning a specific provider/model or variant in your pool. Use an exact id, not `low`/`medium`/`high`/`ultra`. |
+| `classifier` | Select `"local"` (default), `"llm"`, or `"off"`. Object tuning remains available for LLM timeout/cooldown settings. |
+| `classifierModel` | Pin the optional LLM classifier to an exact provider/model or variant; setting it selects the LLM strategy. |
 | `weights` | Language-neutral difficulty-scoring weights. Advanced. |
 | `log` | Append routing decisions to `.pi/router.log`. |
 

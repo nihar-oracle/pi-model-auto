@@ -69,11 +69,22 @@ import {
   type TaskClassifier,
   type CapabilityMode,
 } from "./router-core.ts";
+import {
+  classifyLocally,
+  warmLocalClassifier,
+  type LocalComplexityLabel,
+} from "./local-classifier.ts";
 import { QuotaState, buildPlanKey, filterPoolByQuota, type PlanState } from "./quota.ts";
 
 type ForcedRoute = { mode: CapabilityMode } | { model: string };
 type ResolvedAuth = { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> };
 type QuotaPlanLookup = Map<string, { planKey: string; auth: Awaited<ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>> }>;
+
+const LOCAL_MODE: Record<LocalComplexityLabel, CapabilityMode> = {
+  LOW: "low",
+  MEDIUM: "medium",
+  HIGH: "high",
+};
 
 const ZERO_USAGE = {
   input: 0,
@@ -108,6 +119,7 @@ export default function modelRouter(pi: ExtensionAPI) {
   let turnSelection: { key: string; decision: Decision; selection: Selection; cacheReason?: CacheReason; pending?: boolean } | undefined;
   let routingState: RoutingState = createRoutingState();
   let classifierState: ClassifierState = createClassifierState();
+  let localClassifierErrorShown = false;
   let routerContextWindow: number | undefined;
 
   syncRouterContextWindow(1_000_000);
@@ -128,6 +140,14 @@ export default function modelRouter(pi: ExtensionAPI) {
     turnSelection = undefined;
     routingState = createRoutingState();
     classifierState = createClassifierState();
+    localClassifierErrorShown = false;
+    if (cfg.classifier.enabled && cfg.classifier.strategy === "local") {
+      void warmLocalClassifier().catch((error) => {
+        if (localClassifierErrorShown) return;
+        localClassifierErrorShown = true;
+        ctx.ui.notify(`Pi Router: local classifier unavailable; using heuristic (${String(error)})`, "warning");
+      });
+    }
 
     const recentModel = mostRecentConcreteModel(ctx);
     if (recentModel) syncRouterContextWindow(recentModel.contextWindow);
@@ -392,7 +412,24 @@ export default function modelRouter(pi: ExtensionAPI) {
     quotaPlans: QuotaPlanLookup,
   ): Promise<ClassificationResult | undefined> {
     if (forcedRoute || !cfg.classifier.enabled) return undefined;
-
+    if (cfg.classifier.strategy === "local") {
+      if (contextHasImageForClassifier(context)) {
+        return { mode: "high", reason: "local classifier: image safety fallback" };
+      }
+      try {
+        const result = await classifyLocally(lastUserText(context));
+        return {
+          mode: LOCAL_MODE[result.label],
+          reason: `local classifier: ${result.label.toLowerCase()} (${result.scores[result.label].toFixed(3)})`,
+        };
+      } catch (error) {
+        if (!localClassifierErrorShown) {
+          localClassifierErrorShown = true;
+          ctx.ui.notify(`Pi Router: local classifier unavailable; using heuristic (${String(error)})`, "warning");
+        }
+        return undefined;
+      }
+    }
     const heuristicDecision = decide(context, options, undefined, cfg);
     const selectionPool = repriceForTimeOfDay(
       usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),

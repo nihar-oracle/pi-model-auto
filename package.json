@@ -29,11 +29,13 @@
     "dist",
     "src/index.ts",
     "src/router-core.ts",
+    "src/local-classifier.ts",
     "src/quota.ts",
     "src/canonical-models.ts",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/install-classifier.mjs"
   ],
   "pi": {
     "extensions": [
@@ -51,10 +53,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postinstall": "node scripts/install-classifier.mjs",
     "pretest": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "release": "npm version patch && git push --follow-tags && npm publish"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "3.7.6"
   }
 }

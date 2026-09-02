@@ -178,22 +178,22 @@ describe("canonical model routing", () => {
       }));
       const cfg = loadUserRouterConfig(root);
       expect(cfg.classifier.enabled).toBe(true);
+      expect(cfg.classifier.strategy).toBe("llm");
       expect(cfg.classifierModel).toBe("gateway/gpt-5.4-nano");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("keeps classifier disabled by default while merging tuning options", () => {
+  it("uses the local classifier by default and accepts explicit strategies", () => {
     expect(mergeClassifierConfig({ timeoutMs: 10_000 })).toMatchObject({
-      enabled: false,
+      enabled: true,
+      strategy: "local",
       timeoutMs: 10_000,
       failureThreshold: DEFAULT_CONFIG.classifier.failureThreshold,
     });
-    expect(mergeClassifierConfig({ enabled: true, timeoutMs: 10_000 })).toMatchObject({
-      enabled: true,
-      timeoutMs: 10_000,
-    });
+    expect(mergeClassifierConfig("llm")).toMatchObject({ enabled: true, strategy: "llm" });
+    expect(mergeClassifierConfig("off")).toMatchObject({ enabled: false, strategy: "local" });
   });
 
   it("filters cooled-down quota plans by default and allows opting out", () => {

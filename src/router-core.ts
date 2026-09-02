@@ -172,6 +172,7 @@ export interface RouterConfig {
 }
 
 export interface ClassifierConfig {
+  strategy: "local" | "llm";
   enabled: boolean;
   failureThreshold: number;
   cooldownTurns: number;
@@ -280,7 +281,8 @@ export const DEFAULT_CONFIG: RouterConfig = {
   },
   quota: DEFAULT_QUOTA_CONFIG,
   classifier: {
-    enabled: false,
+    enabled: true,
+    strategy: "local",
     failureThreshold: 3,
     cooldownTurns: 20,
     timeoutMs: 3_000,
@@ -341,6 +343,8 @@ export function mergeClassifierConfig(
   base: ClassifierConfig = DEFAULT_CONFIG.classifier,
 ): ClassifierConfig {
   if (raw === "off" || raw === false) return { ...base, enabled: false };
+  if (raw === "local" || raw === true) return { ...base, enabled: true, strategy: "local" };
+  if (raw === "llm") return { ...base, enabled: true, strategy: "llm" };
   if (!raw || typeof raw !== "object") return base;
   return { ...base, ...(raw as Partial<ClassifierConfig>) };
 }
@@ -351,7 +355,7 @@ export function enableClassifierForPinnedModel(
   rawClassifier: unknown,
 ): ClassifierConfig {
   if (!classifierModel || classifierExplicitlyDisabled(rawClassifier)) return classifier;
-  return { ...classifier, enabled: true };
+  return { ...classifier, enabled: true, strategy: "llm" };
 }
 
 function classifierExplicitlyDisabled(raw: unknown): boolean {
