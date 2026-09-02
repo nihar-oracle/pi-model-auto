@@ -64,5 +64,8 @@
   "dependencies": {
     "@huggingface/transformers": "3.7.6",
     "sharp": "file:stubs/sharp"
+  },
+  "overrides": {
+    "sharp": "$sharp"
   }
 }
