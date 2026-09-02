@@ -151,7 +151,7 @@ describe("canonical model routing", () => {
         router: {
           capabilitySource: "aa",
           modelFilter: { include: ["gateway"] },
-          modeModels: { ultra: "gateway/gpt-5.6-luna" },
+          modeModels: { ultra: { model: "gateway/gpt-5.6-luna", thinking: "xhigh" } },
           modelOverrides: { custom: { costCoef: 0.2 } },
           classifier: "off",
           classifierModel: "gateway/gpt-5.6-luna",
@@ -160,7 +160,7 @@ describe("canonical model routing", () => {
       const cfg = loadUserRouterConfig(root);
       expect(cfg.capabilitySource).toBe("aa");
       expect(cfg.modelFilter.include).toEqual(["gateway"]);
-      expect(cfg.modeModels.ultra).toBe("gateway/gpt-5.6-luna");
+      expect(cfg.modeModels.ultra).toEqual({ model: "gateway/gpt-5.6-luna", thinking: "xhigh" });
       expect(cfg.modelOverrides.custom?.costCoef).toBe(0.2);
       expect(cfg.willingness).toEqual(AA_WILLINGNESS);
       expect(cfg.classifier.enabled).toBe(false);
@@ -258,11 +258,11 @@ describe("canonical model routing", () => {
     expect(resolveCanonicalModel("gateway/gpt-5.4", "ramp")).toMatchObject({ capabilityMode: "low", costTier: "standard" });
   });
 
-  it("uses benchmark effort for auto routes and UI effort for forced models", () => {
-    expect(routingReasoning("high", "medium", false)).toBe("high");
-    expect(routingReasoning("xhigh", "high", false)).toBe("xhigh");
-    expect(routingReasoning(undefined, "medium", false)).toBe("medium");
-    expect(routingReasoning("high", "medium", true)).toBe("medium");
+  it("uses configured mode effort before benchmark effort while forced models honor the UI", () => {
+    expect(routingReasoning("xhigh", "high", "medium", false)).toBe("xhigh");
+    expect(routingReasoning(undefined, "high", "medium", false)).toBe("high");
+    expect(routingReasoning(undefined, undefined, "medium", false)).toBe("medium");
+    expect(routingReasoning("xhigh", "high", "medium", true)).toBe("medium");
   });
 
   it("normalizes conservatively", () => {

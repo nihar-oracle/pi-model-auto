@@ -23,14 +23,15 @@ const RAMP_MODE_BOUNDS: [number, number][] = [[0, 75], [75, 80], [80, 85], [85, 
 /** AA capability modes are Intelligence Index bands on the current frontier scale. Low is <= 41. */
 const AA_MODE_BOUNDS: [number, number][] = [[0, 41], [41, 52], [52, 56], [56, 65]];
 
-/** Choose provider reasoning: auto uses its measured model-effort variant; forced models honor Pi. */
+/** Choose provider reasoning: configured modes override measured effort; forced models honor Pi. */
 export function routingReasoning(
+  configuredEffort: ThinkingLevel | undefined,
   benchmarkEffort: ThinkingLevel | undefined,
   requestedReasoning: ThinkingLevel | undefined,
   forcedModel: boolean,
 ): ThinkingLevel | "off" {
   if (forcedModel) return requestedReasoning ?? benchmarkEffort ?? "off";
-  return benchmarkEffort ?? requestedReasoning ?? "off";
+  return configuredEffort ?? benchmarkEffort ?? requestedReasoning ?? "off";
 }
 
 /** Fallback capability numbers for models with no canonical match and no override. */
@@ -123,6 +124,13 @@ export interface ModelFilter {
   include: string[];
   exclude: string[];
 }
+export interface ModeModelConfig {
+  /** Exact authenticated provider/model endpoint assigned to this capability mode. */
+  model: string;
+  /** Provider reasoning effort used whenever this mode is selected automatically or explicitly. */
+  thinking: ThinkingLevel;
+}
+
 
 export interface RouterConfig {
   /** Which benchmark drives capability + cost. `ramp` (default) = real SWE-bench outcomes; `aa` = synthetic. Never merged. */
@@ -134,8 +142,8 @@ export interface RouterConfig {
     toolDensity: number;
   };
   log: boolean;
-  /** Pin an exact provider/model for a user-facing capability mode. */
-  modeModels: Partial<Record<CapabilityMode, string>>;
+  /** Pin an exact provider/model and reasoning effort for a user-facing capability mode. */
+  modeModels: Partial<Record<CapabilityMode, ModeModelConfig>>;
   /** Restrict the automatically built pool by provider/id/name/canonical substring. Empty include means allow all. */
   modelFilter: ModelFilter;
   /** User-supplied metadata for unknown/private/local models. Keys may be provider/id, model id, or normalized model id. */

@@ -77,9 +77,12 @@ Project config overrides user config.
 ```jsonc
 {
   "router": {
-    "modelFilter": { "include": ["anthropic", "z-ai"], "exclude": [] },
+    "modelFilter": { "include": ["openai-codex"], "exclude": [] },
     "modeModels": {
-      "ultra": "anthropic/claude-3-5-sonnet-20241022"
+      "low": { "model": "openai-codex/gpt-5.6-luna", "thinking": "high" },
+      "medium": { "model": "openai-codex/gpt-5.6-terra", "thinking": "high" },
+      "high": { "model": "openai-codex/gpt-5.6-sol", "thinking": "high" },
+      "ultra": { "model": "openai-codex/gpt-5.6-sol", "thinking": "xhigh" }
     },
     "modelOverrides": {
       "anthropic/claude-3-5-sonnet-20241022": { "costCoef": 0.05 },
@@ -92,7 +95,7 @@ Project config overrides user config.
 }
 ```
 
-Use provider/model ids exactly as they appear in your Pi registry. The names above are public examples. `modeModels` is optional; if you omit it, the router builds each mode from benchmark metadata.
+Use provider/model ids exactly as they appear in your Pi registry. Each `modeModels` entry pairs its endpoint with the reasoning effort used for that mode, so two modes may use the same model at different effort levels. `modeModels` is optional; if you omit it, the router builds each mode and effort from benchmark metadata.
 
 ### `costCoef`
 
@@ -154,9 +157,9 @@ For the AA source, the same four modes are mapped from Artificial Analysis Intel
 
 Representative models are examples from the bundled benchmark tables, not requirements. The router only uses models that are present in your local Pi registry, authenticated, and allowed by `modelFilter`. If none of your available models are in the target mode, the router borrows the nearest stronger mode; if no stronger mode exists, it uses the strongest available lower mode. If no authenticated benchmark-backed models are available at all, it asks you to `/login` or configure model metadata.
 
-Task difficulty chooses the mode, while the continuous difficulty score sets a capability floor inside that mode. The router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. Models without capability-mode metadata retain Pareto routing.
+Task difficulty chooses the mode, while the continuous difficulty score sets a capability floor inside that mode. A configured `modeModels` entry pins both the model and its reasoning effort for that mode. Without a configured entry, the router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. Models without capability-mode metadata retain Pareto routing.
 
-Task difficulty is judged by a local semantic classifier by default. In automatic routing, benchmark-backed effort is selected with the model and takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
+In automatic routing, configured mode effort takes precedence over benchmark-backed effort, which takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
 
 The classifier runs locally and makes no provider call.
 
@@ -239,7 +242,7 @@ As a result, a turn routed to a 272K model displays and compacts against 272K; a
 | --- | --- |
 | `capabilitySource` | Choose `"ramp"` or `"aa"`. |
 | `modelFilter` | Include or exclude providers/models by substring. |
-| `modeModels` | Pin exact endpoints for `low`, `medium`, `high`, or `ultra`. |
+| `modeModels` | Pin an exact endpoint and thinking level for `low`, `medium`, `high`, or `ultra`. |
 | `modelOverrides` | Adjust cost or metadata for known/private/local models. |
 | `willingness` | Control affordable same-mode upgrades after a capability mode is selected. |
 | `cacheAware` | Keep warm prompt caches when switching is not worth it. Enabled by default. |

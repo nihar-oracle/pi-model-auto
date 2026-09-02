@@ -254,7 +254,9 @@ export default function modelRouter(pi: ExtensionAPI) {
 
         syncRouterContextWindow(target.contextWindow);
 
+        const configuredMode = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
         const requestedReasoning = routingReasoning(
+          configuredMode?.thinking,
           selection.benchmarkEffort,
           options?.reasoning,
           decision.cls === "model",
@@ -542,7 +544,18 @@ function selectModel(
     const model = findModelByRef(ctx, decision.chosen);
     if (!model) throw new Error(`Pi Router: forced model not available or not authenticated: ${decision.chosen}`);
     const selected = resolveModel(model, cfg);
+
     return { selected, profile: selected.profiles[0] ?? "balanced", benchmarkEffort: selected.benchmarkEffort, reason: "forced model", alternatives: [] };
+  }
+  const configured = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
+  if (configured) {
+    const selected = pool.all.find((candidate) =>
+      modelKey(candidate.model).toLowerCase() === configured.model.toLowerCase()
+    );
+    if (selected) {
+      const pinned = selectFromPool(decision, { ...pool, all: [selected] }, context, options, cfg);
+      if (pinned) return { ...pinned, reason: `configured ${decision.cls}: ${configured.model}` };
+    }
   }
 
   const selection = selectFromPool(decision, pool, context, options, cfg);
@@ -560,18 +573,18 @@ function applyConfiguredTiers(pool: Pool, cfg: RouterConfig, ctx: ExtensionConte
   };
 
   for (const mode of ["low", "medium", "high", "ultra"] as const) {
-    const ref = cfg.modeModels[mode];
-    if (!ref) continue;
+    const configured = cfg.modeModels[mode];
+    if (!configured) continue;
 
-    const model = findModelByRef(ctx, ref);
+    const model = findModelByRef(ctx, configured.model);
     if (!model) {
-      ctx.ui.notify(`Pi Router: configured ${mode} model not found or unauthenticated: ${ref}`, "warning");
+      ctx.ui.notify(`Pi Router: configured ${mode} model not found or unauthenticated: ${configured.model}`, "warning");
       continue;
     }
 
     const resolved = { ...resolveModel(model, cfg), capabilityMode: mode };
     if (!matchesModelFilter(resolved, cfg.modelFilter)) {
-      ctx.ui.notify(`Pi Router: configured ${mode} model rejected by modelFilter: ${ref}`, "warning");
+      ctx.ui.notify(`Pi Router: configured ${mode} model rejected by modelFilter: ${configured.model}`, "warning");
       continue;
     }
 

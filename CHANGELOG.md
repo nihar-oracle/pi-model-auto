@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- `modeModels` entries now require `{ "model": "provider/id", "thinking": "level" }`, pinning both the endpoint and reasoning effort for each configured capability mode.
+
 ### Changed
 
 - Refreshed the bundled Ramp SWE-Bench data against the August 2026 78-task result set, updated all measured resolve-rate, cost, and tool-call values, and added the high-effort DeepSeek V4 Flash result. The full measured table remains available while Ramp's highlighted score-versus-spend wall is tracked separately for routing priority.
