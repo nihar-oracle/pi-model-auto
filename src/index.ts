@@ -229,8 +229,10 @@ export default function modelRouter(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
-    sessions.delete(ctx.sessionManager.getSessionId());
+  pi.on("session_shutdown", async () => {
+    // OMP's shared extension runner can emit a nested session's shutdown with the parent context.
+    // The event carries no target session ID, so deleting by ctx would invalidate the parent.
+    // Session state lives only for this extension runtime and repeated starts replace the same ID.
   });
 
   pi.on("input", async (event, ctx) => {

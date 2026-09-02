@@ -244,7 +244,7 @@ describe("router context window", () => {
     expect(provider.shouldTriggerFileCompletion(["@route:u"], 0, 8)).toBe(true);
   });
 
-  it("keeps the parent router usable when a child session shuts down", async () => {
+  it("keeps the parent router usable when nested shutdown reports the parent context", async () => {
     const target = model("openai-codex", "gpt-5.6-sol", 372_000);
     const { handlers, initialProvider, routerModel, ctx } = createHarness(target);
     const childCtx = {
@@ -255,7 +255,7 @@ describe("router context window", () => {
 
     await handlers.get("session_start")!({}, ctx);
     await handlers.get("session_start")!({}, childCtx);
-    await handlers.get("session_shutdown")!({ reason: "quit" }, childCtx);
+    await handlers.get("session_shutdown")!({ reason: "quit" }, ctx);
 
     const context: Context = {
       messages: [{ role: "user", content: "continue parent work", timestamp: Date.now() }],

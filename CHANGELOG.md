@@ -14,7 +14,7 @@
 - Refined the router status into a quiet two-state display: one-turn override hints before routing, then the concrete model, applied thinking level, and capability mode; `/auto` repeats the override syntax.
 - Added unified one-turn `@route:<mode|provider/model>` overrides on any interactive turn. Exact-model overrides are restricted to endpoints admitted to the router pool, and the next turn returns to automatic routing.
 - Added the CLI-safe `--route ultra|provider/model` flag for print mode, where Pi consumes leading `@...` tokens as file references before extensions receive the prompt.
-- Isolated router context, selections, classifier state, quota state, and footer decisions by OMP session ID so cancelling a task/subagent cannot invalidate or overwrite its parent session.
+- Isolated router context, selections, classifier state, quota state, and footer decisions by OMP session ID; nested shutdown events retain their session state because OMP does not identify the shutdown target, preventing task cancellation from invalidating its parent.
 
 ## 0.2.1 - 2026-07-30
 
