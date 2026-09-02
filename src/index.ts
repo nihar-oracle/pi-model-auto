@@ -234,8 +234,9 @@ export default function modelRouter(pi: ExtensionAPI) {
           selection = { ...cachedSelection!.selection, reason: `${cachedSelection!.selection.reason}; ${reuseReason}` };
         } else {
           const fresh = selectModel(decision, selectionPool, context, options, ctx, cfg);
-          // Cache-aware stickiness only applies to auto routing (forced routes are the user's explicit choice).
-          if (!forcedRoute && decision.cls !== "model") {
+          // Explicit model/mode pins are contracts; cache economics may only replace unpinned auto selections.
+          const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
+          if (!forcedRoute && decision.cls !== "model" && !configuredPin) {
             const result = cacheAwareSelect(fresh, routingState, selectionPool, context, cfg);
             selection = result.selection;
             cacheReason = result.cacheReason;
