@@ -54,6 +54,15 @@ Most turns should use automatic routing. At the start of a new conversation, you
 @model:anthropic/claude-3-5-sonnet-20241022 use Sonnet here
 ```
 
+For non-interactive CLI use, `@...` is reserved for file expansion before extensions see the prompt. Use the router's CLI-safe `--route` flag instead:
+
+```bash
+pi --route ultra -p "investigate this architecture issue"
+omp --route model:openai-codex/gpt-5.6-sol -p "use Sol here"
+```
+
+Leading whitespace does not activate an `@ultra` prefix; the prefix must be the first character of an interactive prompt.
+
 - `@low`, `@medium`, `@high`, and `@ultra` target the matching capability mode.
 - `@model:provider/model-id` uses that exact model.
 - Without a prefix, `auto` routing lets task difficulty choose the target mode.

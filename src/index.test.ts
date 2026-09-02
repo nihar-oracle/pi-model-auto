@@ -2,7 +2,7 @@
  * Exercise the extension boundary where the router's virtual model mirrors the concrete model that
  * will serve the turn. This catches regressions that pure routing tests cannot observe in Pi's UI.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
@@ -34,7 +34,7 @@ function model(provider: string, id: string, contextWindow: number): Model<Api> 
   };
 }
 
-function createHarness(target: Model<Api>, branch: unknown[] = []) {
+function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: string) {
   const agentDir = mkdtempSync(join(tmpdir(), "pi-model-auto-agent-"));
   temporaryDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -44,6 +44,8 @@ function createHarness(target: Model<Api>, branch: unknown[] = []) {
   const pi = {
     registerProvider: (_name: string, config: ProviderConfig) => providers.push(config),
     registerCommand: vi.fn(),
+    registerFlag: vi.fn(),
+    getFlag: (name: string) => name === "route" ? routeFlag : undefined,
     on: (event: string, handler: Handler) => handlers.set(event, handler),
   } as unknown as ExtensionAPI;
 
@@ -72,7 +74,7 @@ function createHarness(target: Model<Api>, branch: unknown[] = []) {
     ui: { notify: vi.fn(), setStatus: vi.fn() },
   } as unknown as ExtensionContext;
 
-  return { providers, handlers, initialProvider, routerModel, ctx };
+  return { providers, handlers, initialProvider, routerModel, ctx, agentDir };
 }
 
 describe("router context window", () => {
@@ -139,6 +141,34 @@ describe("router context window", () => {
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
       expect.stringMatching(/^↳ gpt-5\.6-sol · high · High/),
+    );
+  });
+
+  it("accepts a CLI-safe route flag without an @-prefixed prompt", async () => {
+    const target = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, initialProvider, routerModel, ctx, agentDir } = createHarness(target, [], "ultra");
+    writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({
+      router: {
+        modeModels: {
+          ultra: { model: "openai-codex/gpt-5.6-sol", thinking: "xhigh" },
+        },
+      },
+    }));
+
+    await handlers.get("session_start")!({}, ctx);
+    const inputResult = await handlers.get("input")!({ source: "interactive", text: "test" }, ctx);
+    expect(inputResult).toEqual({ action: "continue" });
+
+    const context: Context = {
+      messages: [{ role: "user", content: "test", timestamp: Date.now() }],
+    };
+    for await (const _event of initialProvider.streamSimple!(routerModel, context)) {
+      // Consume the stream so the router's asynchronous selection finishes.
+    }
+
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      expect.stringMatching(/^↳ gpt-5\.6-sol · high · Ultra/),
     );
   });
 });

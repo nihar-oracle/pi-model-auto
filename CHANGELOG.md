@@ -12,6 +12,7 @@
 - Replaced the default length/context heuristic with a checksum-pinned, local INT8 ModernBERT complexity classifier. The heuristic remains available with `classifier: "off"`, while `classifier: "llm"` or `classifierModel` retains the bounded provider-backed strategy.
 - Replaced Transformers.js's unused native image dependency with a text-only stub so the local classifier loads in OMP's embedded runtime; image prompts still conservatively route High before classifier inference.
 - Refined the router status into a quiet two-state display: first-turn override hints before routing, then the concrete model, applied thinking level, and capability mode; `/auto` now repeats the override syntax.
+- Added the CLI-safe `--route low|medium|high|ultra|model:provider/model` flag for print mode, where Pi consumes leading `@...` tokens as file references before extensions receive the prompt.
 
 ## 0.2.1 - 2026-07-30
 

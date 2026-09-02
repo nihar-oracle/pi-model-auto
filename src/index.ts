@@ -115,6 +115,7 @@ export default function modelRouter(pi: ExtensionAPI) {
   let quota: QuotaState = new QuotaState(DEFAULT_CONFIG.quota);
   let pool: Pool = { cheapPool: [], strongPool: [], standardPool: [], unknownPool: [], all: [] };
   let forcedRoute: ForcedRoute | undefined;
+  let cliForcedRoute: ForcedRoute | undefined;
   let lastDecision: LastDecision | undefined;
   let turnSelection: { key: string; decision: Decision; selection: Selection; cacheReason?: CacheReason; pending?: boolean } | undefined;
   let routingState: RoutingState = createRoutingState();
@@ -123,6 +124,11 @@ export default function modelRouter(pi: ExtensionAPI) {
   let routerContextWindow: number | undefined;
 
   syncRouterContextWindow(1_000_000);
+
+  pi.registerFlag("route", {
+    type: "string",
+    description: "Pin the first turn to low, medium, high, ultra, or model:provider/model",
+  });
 
   pi.registerCommand("auto", {
     description: "Show Pi Model Router pool and last decision",
@@ -134,6 +140,12 @@ export default function modelRouter(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     extCtx = ctx;
     cfg = loadConfig(ctx);
+    const cliRoute = pi.getFlag("route");
+    cliForcedRoute = typeof cliRoute === "string" ? parseRouteHint(cliRoute) : undefined;
+    forcedRoute = cliForcedRoute;
+    if (typeof cliRoute === "string" && !cliForcedRoute) {
+      ctx.ui.notify(`Pi Router: invalid --route value: ${cliRoute}`, "warning");
+    }
     quota = new QuotaState(cfg.quota);
     quota.load(quotaStateFile());
     pool = applyConfiguredTiers(buildAutoPool(ctx.modelRegistry.getAvailable(), cfg), cfg, ctx);
@@ -165,6 +177,7 @@ export default function modelRouter(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     forcedRoute = undefined;
+    cliForcedRoute = undefined;
     lastDecision = undefined;
     turnSelection = undefined;
     extCtx = undefined;
@@ -174,11 +187,12 @@ export default function modelRouter(pi: ExtensionAPI) {
     if (event.source === "extension") return { action: "continue" };
 
     const parsed = parseForcedRoute(event.text);
-    const parsedForThisTurn = parsed && isInitialUserTurn(ctx) ? parsed : undefined;
+    const initialTurn = isInitialUserTurn(ctx);
+    const parsedForThisTurn = parsed && initialTurn ? parsed : undefined;
     if (parsed && !parsedForThisTurn) {
       ctx.ui.notify("Pi Router: @low/@medium/@high/@ultra/@model hints only apply at the start of a conversation. Start a new session to pin a mode without carrying existing history.", "warning");
     }
-    forcedRoute = parsedForThisTurn?.route;
+    forcedRoute = parsedForThisTurn?.route ?? (initialTurn ? cliForcedRoute : undefined);
     // Pi checks preflight compaction after input hooks but before `streamSimple`, so the target
     // window must be installed here or a large→small model switch can miss its compact threshold.
     if (isRouterModel(ctx.model) && !event.streamingBehavior) {
@@ -624,12 +638,19 @@ function isRouterModel(model: Model<Api> | undefined): boolean {
   return model?.provider === "pi-router" && model.id === "auto";
 }
 
+function parseRouteHint(text: string): ForcedRoute | undefined {
+  const normalized = text.trim();
+  const mode = parseCapabilityMode(normalized);
+  if (mode) return { mode };
+  const model = normalized.match(/^model:([^\s/]+\/[^\s]+)$/i)?.[1];
+  return model ? { model } : undefined;
+}
+
 function parseForcedRoute(text: string): { route: ForcedRoute; text: string } | undefined {
-  const match = text.match(/^@(low|medium|high|ultra|model:([^\s]+))\s+([\s\S]*)$/i);
+  const match = text.match(/^@(low|medium|high|ultra|model:[^\s]+)\s+([\s\S]*)$/i);
   if (!match) return undefined;
-  const mode = parseCapabilityMode(match[1]);
-  if (mode) return { route: { mode }, text: match[3] };
-  return { route: { model: match[2] }, text: match[3] };
+  const route = parseRouteHint(match[1]);
+  return route ? { route, text: match[2] } : undefined;
 }
 
 function isInitialUserTurn(ctx: ExtensionContext): boolean {
@@ -711,6 +732,7 @@ function describeRouter(
     "overrides:",
     "  first prompt in a new session: @low <prompt> | @medium <prompt> | @high <prompt> | @ultra <prompt>",
     "  exact endpoint: @model:provider/model <prompt>",
+    "  CLI/print mode: --route low|medium|high|ultra|model:provider/model",
   ];
 
   if (lastDecision) {
