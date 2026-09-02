@@ -42,34 +42,33 @@ Check what the router sees:
 /auto
 ```
 
-Before the first prompt, the router status quietly lists the available mode overrides. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` includes the same new-session and exact-endpoint override syntax alongside the detailed routing decision.
+The router status lists the one-turn override syntax before routing. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` repeats the override syntax alongside the detailed routing decision.
 
-Most turns should use automatic routing. At the start of a new conversation, you can pin the initial capability mode:
+Most turns should use automatic routing. To override any single turn—including in the middle of a conversation—start that prompt with `@route:`:
 
 ```text
-@low summarize this file
-@medium implement this small change
-@high debug this failing test
-@ultra investigate this architecture issue
-@model:anthropic/claude-3-5-sonnet-20241022 use Sonnet here
+@route:low summarize this file
+@route:medium implement this small change
+@route:high debug this failing test
+@route:ultra investigate this architecture issue
+@route:openai-codex/gpt-5.6-sol use Sol here
 ```
 
-For non-interactive CLI use, `@...` is reserved for file expansion before extensions see the prompt. Use the router's CLI-safe `--route` flag instead:
+- `@route:low|medium|high|ultra` selects one configured capability option.
+- `@route:provider/model-id` selects one exact endpoint already admitted to the router pool.
+- While `pi-router/auto` is selected, typing `@route:` offers the configured modes and exact models from the router pool.
+- The override applies only to that turn; the following prompt returns to automatic routing.
+- The prefix must be the first character and is removed before the model sees the prompt.
+- Without a prefix, task difficulty chooses the route automatically.
+
+For non-interactive CLI use, `@...` is reserved for file expansion before extensions see the prompt. Pass the same route expression through `--route`:
 
 ```bash
 pi --route ultra -p "investigate this architecture issue"
-omp --route model:openai-codex/gpt-5.6-sol -p "use Sol here"
+omp --route openai-codex/gpt-5.6-sol -p "use Sol here"
 ```
 
-Leading whitespace does not activate an `@ultra` prefix; the prefix must be the first character of an interactive prompt.
-
-- `@low`, `@medium`, `@high`, and `@ultra` target the matching capability mode.
-- `@model:provider/model-id` uses that exact model.
-- Without a prefix, `auto` routing lets task difficulty choose the target mode.
-
-These prefixes are intentionally only honored on the first user turn of a conversation. They do not create an isolated subagent or trimmed context. If you used them after a long history, the selected model would need to read the existing session history, which can be much more expensive. Start a new session when you want to pin a mode cleanly.
-
-The prefix is removed before the model sees your prompt. `cheap` and `strong` are no longer supported routing hints; use `low` and `ultra` instead.
+Leading whitespace does not activate an override. `cheap` and `strong` are not supported route names; use `low` and `ultra`.
 
 ## Configure When Needed
 
@@ -170,7 +169,7 @@ Representative models are examples from the bundled benchmark tables, not requir
 
 Task difficulty chooses the mode, while the continuous difficulty score sets a capability floor inside that mode. A configured `modeModels` entry pins both the model and its reasoning effort for that mode. Without a configured entry, the router picks the cheapest effective-cost model meeting the floor, then permits only affordable `willingness` upgrades inside the same mode. It never enters the next mode early. Models without capability-mode metadata retain Pareto routing.
 
-In automatic routing, configured mode effort takes precedence over benchmark-backed effort, which takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Forced concrete-model routes still honor Pi's selected effort. When you know a task is harder than it looks, start a new session with `@high` or `@ultra`.
+In automatic routing, configured mode effort takes precedence over benchmark-backed effort, which takes precedence over Pi's session default before the model's `thinkingLevelMap` is applied. Exact-model overrides still honor Pi's selected effort. When a turn is harder than it looks, prefix that prompt with `@route:high` or `@route:ultra`.
 
 The classifier runs locally and makes no provider call.
 
@@ -186,7 +185,7 @@ Only the latest user message is classified. The model is warmed when the Pi sess
 is capped at the upstream training length of 128 tokens. Its `LOW`, `MEDIUM`, and `HIGH` labels map
 directly to the router's `low`, `medium`, and `high` modes; it never guesses `ultra`. Image turns route
 to `high`, and predictions below the training-calibrated 0.45 confidence floor fail upward to `high`.
-Forced first-turn pins and tool-call continuations do not run another classification.
+One-turn overrides and tool-call continuations do not run another classification.
 
 On the pinned 1,200-query public
 [`llm-query-complexity-benchmark`](https://huggingface.co/datasets/anasnassar/llm-query-complexity-benchmark)

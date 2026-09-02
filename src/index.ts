@@ -122,12 +122,13 @@ export default function modelRouter(pi: ExtensionAPI) {
   let classifierState: ClassifierState = createClassifierState();
   let localClassifierErrorShown = false;
   let routerContextWindow: number | undefined;
+  const autocompleteContexts = new WeakSet<object>();
 
   syncRouterContextWindow(1_000_000);
 
   pi.registerFlag("route", {
     type: "string",
-    description: "Pin the first turn to low, medium, high, ultra, or model:provider/model",
+    description: "Override the first turn with low|medium|high|ultra or provider/model",
   });
 
   pi.registerCommand("auto", {
@@ -149,6 +150,48 @@ export default function modelRouter(pi: ExtensionAPI) {
     quota = new QuotaState(cfg.quota);
     quota.load(quotaStateFile());
     pool = applyConfiguredTiers(buildAutoPool(ctx.modelRegistry.getAvailable(), cfg), cfg, ctx);
+    if (!autocompleteContexts.has(ctx)) {
+      autocompleteContexts.add(ctx);
+      ctx.ui.addAutocompleteProvider((current) => ({
+        triggerCharacters: ["@"],
+        async getSuggestions(lines, line, col, options) {
+          const beforeCursor = (lines[line] ?? "").slice(0, col);
+          const match = beforeCursor.match(/^@route:([^\s]*)$/i);
+          if (!isRouterModel(ctx.model) || !match) {
+            return current.getSuggestions(lines, line, col, options);
+          }
+
+          const typedTarget = (match[1] ?? "").toLowerCase();
+          const modes = (["low", "medium", "high", "ultra"] as const).map((mode) => {
+            const configured = cfg.modeModels[mode];
+            const details = configured
+              ? `${configured.model}${configured.thinking ? ` · ${configured.thinking}` : ""} · one turn`
+              : "Automatic model selection · one turn";
+            return { value: `@route:${mode} `, label: `@route:${mode}`, description: details };
+          });
+          const seen = new Set<string>();
+          const models = pool.all.flatMap((candidate) => {
+            const key = modelKey(candidate.model);
+            const normalized = key.toLowerCase();
+            if (seen.has(normalized)) return [];
+            seen.add(normalized);
+            return [{ value: `@route:${key} `, label: `@route:${key}`, description: "Exact model · one turn" }];
+          });
+          const items = [...modes, ...models].filter((item) =>
+            item.label.slice("@route:".length).toLowerCase().startsWith(typedTarget)
+          );
+          return { prefix: match[0], items };
+        },
+        applyCompletion(lines, line, col, item, prefix) {
+          return current.applyCompletion(lines, line, col, item, prefix);
+        },
+        shouldTriggerFileCompletion(lines, line, col) {
+          const beforeCursor = (lines[line] ?? "").slice(0, col);
+          if (isRouterModel(ctx.model) && /^@route:[^\s]*$/i.test(beforeCursor)) return false;
+          return current.shouldTriggerFileCompletion?.(lines, line, col) ?? true;
+        },
+      }));
+    }
     turnSelection = undefined;
     routingState = createRoutingState();
     classifierState = createClassifierState();
@@ -188,23 +231,20 @@ export default function modelRouter(pi: ExtensionAPI) {
 
     const parsed = parseForcedRoute(event.text);
     const initialTurn = isInitialUserTurn(ctx);
-    const parsedForThisTurn = parsed && initialTurn ? parsed : undefined;
-    if (parsed && !parsedForThisTurn) {
-      ctx.ui.notify("Pi Router: @low/@medium/@high/@ultra/@model hints only apply at the start of a conversation. Start a new session to pin a mode without carrying existing history.", "warning");
-    }
-    forcedRoute = parsedForThisTurn?.route ?? (initialTurn ? cliForcedRoute : undefined);
+    forcedRoute = parsed?.route ?? (initialTurn ? cliForcedRoute : undefined);
+    const routedText = parsed?.text ?? event.text;
     // Pi checks preflight compaction after input hooks but before `streamSimple`, so the target
     // window must be installed here or a large→small model switch can miss its compact threshold.
     if (isRouterModel(ctx.model) && !event.streamingBehavior) {
       try {
-        await preselectTurn(ctx, inputRoutingContext(ctx, parsedForThisTurn?.text ?? event.text, event.images));
+        await preselectTurn(ctx, inputRoutingContext(ctx, routedText, event.images));
       } catch {
         turnSelection = undefined;
       }
     }
 
-    return parsedForThisTurn
-      ? { action: "transform", text: parsedForThisTurn.text, images: event.images }
+    return parsed
+      ? { action: "transform", text: routedText, images: event.images }
       : { action: "continue" };
   });
 
@@ -247,7 +287,7 @@ export default function modelRouter(pi: ExtensionAPI) {
           const reuseReason = preselectedTurn ? "preselected before compaction" : "reused within user turn";
           selection = { ...cachedSelection!.selection, reason: `${cachedSelection!.selection.reason}; ${reuseReason}` };
         } else {
-          const fresh = selectModel(decision, selectionPool, context, options, ctx, cfg);
+          const fresh = selectModel(decision, selectionPool, context, options, cfg);
           // Explicit model/mode pins are contracts; cache economics may only replace unpinned auto selections.
           const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
           if (!forcedRoute && decision.cls !== "model" && !configuredPin) {
@@ -356,10 +396,11 @@ export default function modelRouter(pi: ExtensionAPI) {
         forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
         new Date().getHours(),
       );
-    const fresh = selectModel(decision, selectionPool, context, undefined, ctx, cfg);
+    const fresh = selectModel(decision, selectionPool, context, undefined, cfg);
     let selection = fresh;
     let cacheReason: CacheReason | undefined;
-    if (!forcedRoute && decision.cls !== "model") {
+    const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
+    if (!forcedRoute && decision.cls !== "model" && !configuredPin) {
       const result = cacheAwareSelect(fresh, routingState, selectionPool, context, cfg);
       selection = result.selection;
       cacheReason = result.cacheReason;
@@ -552,14 +593,13 @@ function selectModel(
   pool: Pool,
   context: Context,
   options: SimpleStreamOptions | undefined,
-  ctx: ExtensionContext,
   cfg: RouterConfig,
 ) {
   if (decision.cls === "model") {
-    const model = findModelByRef(ctx, decision.chosen);
-    if (!model) throw new Error(`Pi Router: forced model not available or not authenticated: ${decision.chosen}`);
-    const selected = resolveModel(model, cfg);
-
+    const selected = pool.all.find((candidate) =>
+      modelKey(candidate.model).toLowerCase() === decision.chosen.toLowerCase()
+    );
+    if (!selected) throw new Error(`Pi Router: forced model is not available in the router pool: ${decision.chosen}`);
     return { selected, profile: selected.profiles[0] ?? "balanced", benchmarkEffort: selected.benchmarkEffort, reason: "forced model", alternatives: [] };
   }
   const configured = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
@@ -642,12 +682,11 @@ function parseRouteHint(text: string): ForcedRoute | undefined {
   const normalized = text.trim();
   const mode = parseCapabilityMode(normalized);
   if (mode) return { mode };
-  const model = normalized.match(/^model:([^\s/]+\/[^\s]+)$/i)?.[1];
-  return model ? { model } : undefined;
+  return /^[^\s/]+\/[^\s]+$/.test(normalized) ? { model: normalized } : undefined;
 }
 
 function parseForcedRoute(text: string): { route: ForcedRoute; text: string } | undefined {
-  const match = text.match(/^@(low|medium|high|ultra|model:[^\s]+)\s+([\s\S]*)$/i);
+  const match = text.match(/^@route:([^\s]+)\s+([\s\S]*)$/i);
   if (!match) return undefined;
   const route = parseRouteHint(match[1]);
   return route ? { route, text: match[2] } : undefined;
@@ -730,9 +769,9 @@ function describeRouter(
       return `  ${profile}: ${points || "none"}`;
     }),
     "overrides:",
-    "  first prompt in a new session: @low <prompt> | @medium <prompt> | @high <prompt> | @ultra <prompt>",
-    "  exact endpoint: @model:provider/model <prompt>",
-    "  CLI/print mode: --route low|medium|high|ultra|model:provider/model",
+    "  one turn: @route:low|medium|high|ultra <prompt>",
+    "  one turn, exact endpoint: @route:provider/model <prompt>",
+    "  CLI/print mode: --route ultra|provider/model",
   ];
 
   if (lastDecision) {
@@ -866,7 +905,7 @@ function looksRateLimited(message: AssistantMessage): boolean {
 }
 
 function readyStatus(): string {
-  return "Auto · first prompt: @low @medium @high @ultra";
+  return "Auto · one turn: @route:<mode|provider/model>";
 }
 
 function shortStatus(decision: LastDecision, quota: QuotaState): string {

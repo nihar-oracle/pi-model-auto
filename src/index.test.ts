@@ -38,6 +38,7 @@ function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: s
   const agentDir = mkdtempSync(join(tmpdir(), "pi-model-auto-agent-"));
   temporaryDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
+  writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({ router: { classifier: "off" } }));
 
   const providers: ProviderConfig[] = [];
   const handlers = new Map<string, Handler>();
@@ -71,7 +72,7 @@ function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: s
     sessionManager: { getBranch: () => branch },
     getSystemPrompt: () => "",
     isProjectTrusted: () => false,
-    ui: { notify: vi.fn(), setStatus: vi.fn() },
+    ui: { notify: vi.fn(), setStatus: vi.fn(), addAutocompleteProvider: vi.fn() },
   } as unknown as ExtensionContext;
 
   return { providers, handlers, initialProvider, routerModel, ctx, agentDir };
@@ -110,7 +111,7 @@ describe("router context window", () => {
     await handlers.get("session_start")!({}, ctx);
     expect(ctx.ui.setStatus).toHaveBeenCalledWith(
       "router",
-      "Auto · first prompt: @low @medium @high @ultra",
+      "Auto · one turn: @route:<mode|provider/model>",
     );
     const inputResult = await handlers.get("input")!({ source: "interactive", text: "test" }, ctx);
 
@@ -124,7 +125,7 @@ describe("router context window", () => {
 
     await handlers.get("session_start")!({}, ctx);
     const inputResult = await handlers.get("input")!(
-      { source: "interactive", text: "@model:magi-codex/gpt-5.6-sol test" },
+      { source: "interactive", text: "@route:magi-codex/gpt-5.6-sol test" },
       ctx,
     );
     expect(inputResult).toEqual({ action: "transform", text: "test", images: undefined });
@@ -170,5 +171,76 @@ describe("router context window", () => {
       "router",
       expect.stringMatching(/^↳ gpt-5\.6-sol · high · Ultra/),
     );
+  });
+
+  it("accepts a one-turn mode override in the middle of a session", async () => {
+    const target = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const branch = [{
+      type: "message",
+      id: "user-1",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "earlier turn" }],
+        timestamp: Date.now(),
+      },
+    }];
+    const { handlers, ctx } = createHarness(target, branch);
+
+    await handlers.get("session_start")!({}, ctx);
+    await expect(handlers.get("input")!(
+      { source: "interactive", text: "@route:ultra inspect this" },
+      ctx,
+    )).resolves.toEqual({ action: "transform", text: "inspect this", images: undefined });
+    await expect(handlers.get("input")!(
+      { source: "interactive", text: "continue normally" },
+      ctx,
+    )).resolves.toEqual({ action: "continue" });
+  });
+
+  it("completes one-turn routes only while the router model is selected", async () => {
+    const target = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, ctx, agentDir } = createHarness(target);
+    writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({
+      router: {
+        classifier: "off",
+        modeModels: {
+          ultra: { model: "openai-codex/gpt-5.6-sol", thinking: "xhigh" },
+        },
+      },
+    }));
+
+    await handlers.get("session_start")!({}, ctx);
+    const factory = vi.mocked(ctx.ui.addAutocompleteProvider).mock.calls[0][0];
+    const current = {
+      getSuggestions: vi.fn().mockResolvedValue({ prefix: "", items: [] }),
+      applyCompletion: vi.fn(),
+      shouldTriggerFileCompletion: vi.fn(() => true),
+    };
+    const provider = factory(current);
+
+    await expect(provider.getSuggestions(["@route:u"], 0, 8, {})).resolves.toEqual({
+      prefix: "@route:u",
+      items: [{
+        value: "@route:ultra ",
+        label: "@route:ultra",
+        description: "openai-codex/gpt-5.6-sol · xhigh · one turn",
+      }],
+    });
+    await expect(provider.getSuggestions(["@route:openai"], 0, 14, {})).resolves.toEqual({
+      prefix: "@route:openai",
+      items: [{
+        value: "@route:openai-codex/gpt-5.6-sol ",
+        label: "@route:openai-codex/gpt-5.6-sol",
+        description: "Exact model · one turn",
+      }],
+    });
+    expect(provider.shouldTriggerFileCompletion(["@route:u"], 0, 8)).toBe(false);
+
+    ctx.model = target;
+    await provider.getSuggestions(["@route:u"], 0, 8, {});
+    expect(current.getSuggestions).toHaveBeenCalledWith(["@route:u"], 0, 8, {});
+    expect(provider.shouldTriggerFileCompletion(["@route:u"], 0, 8)).toBe(true);
   });
 });
