@@ -35,7 +35,8 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "scripts/install-classifier.mjs"
+    "scripts/install-classifier.mjs",
+    "stubs/sharp"
   ],
   "pi": {
     "extensions": [
@@ -61,9 +62,7 @@
     "release": "npm version patch && git push --follow-tags && npm publish"
   },
   "dependencies": {
-    "@huggingface/transformers": "3.7.6"
-  },
-  "overrides": {
-    "sharp": "0.35.4"
+    "@huggingface/transformers": "3.7.6",
+    "sharp": "file:stubs/sharp"
   }
 }
