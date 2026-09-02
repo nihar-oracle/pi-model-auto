@@ -16,7 +16,7 @@ jobs:
       matrix:
         risk_lambda: [0.25, 0.5, 1.0]
     env:
-      HF_HOME: ${{ runner.temp }}/huggingface
+      HF_HOME: /tmp/huggingface
       TOKENIZERS_PARALLELISM: "false"
       OMP_NUM_THREADS: "4"
       MKL_NUM_THREADS: "4"
