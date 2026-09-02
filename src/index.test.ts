@@ -34,7 +34,7 @@ function model(provider: string, id: string, contextWindow: number): Model<Api> 
   };
 }
 
-function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: string) {
+function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: string, sessionId = "parent") {
   const agentDir = mkdtempSync(join(tmpdir(), "pi-model-auto-agent-"));
   temporaryDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -69,7 +69,7 @@ function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: s
     cwd: agentDir,
     model: routerModel,
     modelRegistry: registry,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: { getSessionId: () => sessionId, getBranch: () => branch },
     getSystemPrompt: () => "",
     isProjectTrusted: () => false,
     ui: { notify: vi.fn(), setStatus: vi.fn(), addAutocompleteProvider: vi.fn() },
@@ -242,5 +242,35 @@ describe("router context window", () => {
     await provider.getSuggestions(["@route:u"], 0, 8, {});
     expect(current.getSuggestions).toHaveBeenCalledWith(["@route:u"], 0, 8, {});
     expect(provider.shouldTriggerFileCompletion(["@route:u"], 0, 8)).toBe(true);
+  });
+
+  it("keeps the parent router usable when a child session shuts down", async () => {
+    const target = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, initialProvider, routerModel, ctx } = createHarness(target);
+    const childCtx = {
+      ...ctx,
+      sessionManager: { getSessionId: () => "child", getBranch: () => [] },
+      ui: { notify: vi.fn(), setStatus: vi.fn(), addAutocompleteProvider: vi.fn() },
+    } as unknown as ExtensionContext;
+
+    await handlers.get("session_start")!({}, ctx);
+    await handlers.get("session_start")!({}, childCtx);
+    await handlers.get("session_shutdown")!({ reason: "quit" }, childCtx);
+
+    const context: Context = {
+      messages: [{ role: "user", content: "continue parent work", timestamp: Date.now() }],
+    };
+    const events = [];
+    for await (const event of initialProvider.streamSimple!(routerModel, context, { sessionId: "parent" })) {
+      events.push(event);
+    }
+
+    expect(events.some((event) =>
+      event.type === "error" && event.error.errorMessage?.includes("session state")
+    )).toBe(false);
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      expect.stringMatching(/^↳ gpt-5\.6-sol/),
+    );
   });
 });

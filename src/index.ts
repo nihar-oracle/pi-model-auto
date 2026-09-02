@@ -109,18 +109,22 @@ interface LastDecision extends Decision {
   cacheReason?: CacheReason;
 }
 
+interface RouterSessionState {
+  ctx: ExtensionContext;
+  cfg: RouterConfig;
+  quota: QuotaState;
+  pool: Pool;
+  forcedRoute?: ForcedRoute;
+  cliForcedRoute?: ForcedRoute;
+  lastDecision?: LastDecision;
+  turnSelection?: { key: string; decision: Decision; selection: Selection; cacheReason?: CacheReason; pending?: boolean };
+  routingState: RoutingState;
+  classifierState: ClassifierState;
+  localClassifierErrorShown: boolean;
+}
+
 export default function modelRouter(pi: ExtensionAPI) {
-  let extCtx: ExtensionContext | undefined;
-  let cfg: RouterConfig = DEFAULT_CONFIG;
-  let quota: QuotaState = new QuotaState(DEFAULT_CONFIG.quota);
-  let pool: Pool = { cheapPool: [], strongPool: [], standardPool: [], unknownPool: [], all: [] };
-  let forcedRoute: ForcedRoute | undefined;
-  let cliForcedRoute: ForcedRoute | undefined;
-  let lastDecision: LastDecision | undefined;
-  let turnSelection: { key: string; decision: Decision; selection: Selection; cacheReason?: CacheReason; pending?: boolean } | undefined;
-  let routingState: RoutingState = createRoutingState();
-  let classifierState: ClassifierState = createClassifierState();
-  let localClassifierErrorShown = false;
+  const sessions = new Map<string, RouterSessionState>();
   let routerContextWindow: number | undefined;
   const autocompleteContexts = new WeakSet<object>();
 
@@ -134,22 +138,29 @@ export default function modelRouter(pi: ExtensionAPI) {
   pi.registerCommand("auto", {
     description: "Show Pi Model Router pool and last decision",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(describeRouter(repriceForTimeOfDay(pool, new Date().getHours()), cfg, lastDecision, quota), "info");
+      const state = sessionState(ctx);
+      ctx.ui.notify(describeRouter(repriceForTimeOfDay(state.pool, new Date().getHours()), state.cfg, state.lastDecision, state.quota), "info");
     },
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    extCtx = ctx;
-    cfg = loadConfig(ctx);
+    const cfg = loadConfig(ctx);
     const cliRoute = pi.getFlag("route");
-    cliForcedRoute = typeof cliRoute === "string" ? parseRouteHint(cliRoute) : undefined;
-    forcedRoute = cliForcedRoute;
-    if (typeof cliRoute === "string" && !cliForcedRoute) {
-      ctx.ui.notify(`Pi Router: invalid --route value: ${cliRoute}`, "warning");
-    }
-    quota = new QuotaState(cfg.quota);
+    const cliForcedRoute = typeof cliRoute === "string" ? parseRouteHint(cliRoute) : undefined;
+    const quota = new QuotaState(cfg.quota);
     quota.load(quotaStateFile());
-    pool = applyConfiguredTiers(buildAutoPool(ctx.modelRegistry.getAvailable(), cfg), cfg, ctx);
+    const state: RouterSessionState = {
+      ctx,
+      cfg,
+      quota,
+      pool: applyConfiguredTiers(buildAutoPool(ctx.modelRegistry.getAvailable(), cfg), cfg, ctx),
+      forcedRoute: cliForcedRoute,
+      cliForcedRoute,
+      routingState: createRoutingState(),
+      classifierState: createClassifierState(),
+      localClassifierErrorShown: false,
+    };
+    sessions.set(ctx.sessionManager.getSessionId(), state);
     if (!autocompleteContexts.has(ctx)) {
       autocompleteContexts.add(ctx);
       ctx.ui.addAutocompleteProvider((current) => ({
@@ -163,14 +174,14 @@ export default function modelRouter(pi: ExtensionAPI) {
 
           const typedTarget = (match[1] ?? "").toLowerCase();
           const modes = (["low", "medium", "high", "ultra"] as const).map((mode) => {
-            const configured = cfg.modeModels[mode];
+            const configured = sessionState(ctx).cfg.modeModels[mode];
             const details = configured
               ? `${configured.model}${configured.thinking ? ` · ${configured.thinking}` : ""} · one turn`
               : "Automatic model selection · one turn";
             return { value: `@route:${mode} `, label: `@route:${mode}`, description: details };
           });
           const seen = new Set<string>();
-          const models = pool.all.flatMap((candidate) => {
+          const models = sessionState(ctx).pool.all.flatMap((candidate) => {
             const key = modelKey(candidate.model);
             const normalized = key.toLowerCase();
             if (seen.has(normalized)) return [];
@@ -192,14 +203,13 @@ export default function modelRouter(pi: ExtensionAPI) {
         },
       }));
     }
-    turnSelection = undefined;
-    routingState = createRoutingState();
-    classifierState = createClassifierState();
-    localClassifierErrorShown = false;
+    if (typeof cliRoute === "string" && !cliForcedRoute) {
+      ctx.ui.notify(`Pi Router: invalid --route value: ${cliRoute}`, "warning");
+    }
     if (cfg.classifier.enabled && cfg.classifier.strategy === "local") {
       void warmLocalClassifier().catch((error) => {
-        if (localClassifierErrorShown) return;
-        localClassifierErrorShown = true;
+        if (state.localClassifierErrorShown) return;
+        state.localClassifierErrorShown = true;
         ctx.ui.notify(`Pi Router: local classifier unavailable; using heuristic (${String(error)})`, "warning");
       });
     }
@@ -207,39 +217,37 @@ export default function modelRouter(pi: ExtensionAPI) {
     const recentModel = mostRecentConcreteModel(ctx);
     if (recentModel) syncRouterContextWindow(recentModel.contextWindow);
 
-    updateRouterStatus(ctx, pool.all.length === 0 ? "No routed models" : readyStatus());
+    updateRouterStatus(ctx, state.pool.all.length === 0 ? "No routed models" : readyStatus());
   });
 
   pi.on("model_select", async (event, ctx) => {
+    const state = sessions.get(ctx.sessionManager.getSessionId());
     if (isRouterModel(event.model)) {
-      updateRouterStatus(ctx, lastDecision ? shortStatus(lastDecision, quota) : readyStatus());
+      updateRouterStatus(ctx, state?.lastDecision ? shortStatus(state.lastDecision, state.quota) : readyStatus());
     } else {
       ctx.ui.setStatus("router", undefined);
     }
   });
 
-  pi.on("session_shutdown", async () => {
-    forcedRoute = undefined;
-    cliForcedRoute = undefined;
-    lastDecision = undefined;
-    turnSelection = undefined;
-    extCtx = undefined;
+  pi.on("session_shutdown", async (_event, ctx) => {
+    sessions.delete(ctx.sessionManager.getSessionId());
   });
 
   pi.on("input", async (event, ctx) => {
+    const state = sessionState(ctx);
     if (event.source === "extension") return { action: "continue" };
 
     const parsed = parseForcedRoute(event.text);
     const initialTurn = isInitialUserTurn(ctx);
-    forcedRoute = parsed?.route ?? (initialTurn ? cliForcedRoute : undefined);
+    state.forcedRoute = parsed?.route ?? (initialTurn ? state.cliForcedRoute : undefined);
     const routedText = parsed?.text ?? event.text;
     // Pi checks preflight compaction after input hooks but before `streamSimple`, so the target
     // window must be installed here or a large→small model switch can miss its compact threshold.
     if (isRouterModel(ctx.model) && !event.streamingBehavior) {
       try {
-        await preselectTurn(ctx, inputRoutingContext(ctx, routedText, event.images));
+        await preselectTurn(state, inputRoutingContext(ctx, routedText, event.images));
       } catch {
-        turnSelection = undefined;
+        state.turnSelection = undefined;
       }
     }
 
@@ -253,31 +261,31 @@ export default function modelRouter(pi: ExtensionAPI) {
 
     void (async () => {
       try {
-        const ctx = extCtx;
-        if (!ctx) throw new Error("Pi Router: extension context not initialized");
+        const state = streamSessionState(context, options);
+        const { ctx, cfg, pool, quota } = state;
         if (pool.all.length === 0) {
           throw new Error("Pi Router: no authenticated models. Run /login or configure an API key, then /reload.");
         }
 
-        const quotaPlans = cfg.quota.enabled && !forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
+        const quotaPlans = cfg.quota.enabled && !state.forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
         const turnKey = routingTurnKey(context);
-        const cachedSelection = turnSelection;
+        const cachedSelection = state.turnSelection;
         const preselectedTurn = cachedSelection?.pending === true && cachedSelection.key === turnKey;
         const reuseTurnSelection =
           preselectedTurn ||
           (shouldReuseTurnSelection(context) && cachedSelection?.key === turnKey && cachedSelection.decision.cls !== "model");
         const currentClassifier = !reuseTurnSelection && !shouldReuseTurnSelection(context)
-          ? await classifyCurrentTurnWhenUseful(ctx, context, options, quotaPlans)
+          ? await classifyCurrentTurnWhenUseful(state, context, options, quotaPlans)
           : undefined;
         const decision = reuseTurnSelection
           ? cachedSelection!.decision
-          : decide(context, options, forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
+          : decide(context, options, state.forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
         // Re-evaluate time-of-day shadow-price windows once per turn (clock read here, pick reused
         // within the turn), so a window boundary like GLM 14:00–18:00 takes effect without a /reload.
         const selectionPool = decision.cls === "model" || reuseTurnSelection
           ? pool
           : repriceForTimeOfDay(
-            forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
+            state.forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
             new Date().getHours(),
           );
 
@@ -290,8 +298,8 @@ export default function modelRouter(pi: ExtensionAPI) {
           const fresh = selectModel(decision, selectionPool, context, options, cfg);
           // Explicit model/mode pins are contracts; cache economics may only replace unpinned auto selections.
           const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
-          if (!forcedRoute && decision.cls !== "model" && !configuredPin) {
-            const result = cacheAwareSelect(fresh, routingState, selectionPool, context, cfg);
+          if (!state.forcedRoute && decision.cls !== "model" && !configuredPin) {
+            const result = cacheAwareSelect(fresh, state.routingState, selectionPool, context, cfg);
             selection = result.selection;
             cacheReason = result.cacheReason;
           } else {
@@ -300,7 +308,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         }
         const target = selection.selected.model;
 
-        turnSelection = { key: turnKey, decision, selection, cacheReason };
+        state.turnSelection = { key: turnKey, decision, selection, cacheReason };
 
         const selectedAuth = quotaPlans.get(modelKey(target))?.auth;
         const auth = selectedAuth ?? await ctx.modelRegistry.getApiKeyAndHeaders(target);
@@ -320,7 +328,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         const reasoning = clampedReasoning === "off" ? undefined : clampedReasoning;
         const maxTokens = Math.min(options?.maxTokens ?? target.maxTokens, target.maxTokens);
 
-        lastDecision = {
+        const streamDecision: LastDecision = {
           ...decision,
           chosen: modelKey(target),
           planKey,
@@ -335,9 +343,10 @@ export default function modelRouter(pi: ExtensionAPI) {
           alternatives: selection.alternatives,
           cacheReason,
         };
+        state.lastDecision = streamDecision;
 
-        updateRouterStatus(ctx, shortStatus(lastDecision, quota));
-        logDecision(ctx, cfg, lastDecision);
+        updateRouterStatus(ctx, shortStatus(streamDecision, quota));
+        logDecision(ctx, cfg, streamDecision);
 
         const inner = aiStreamSimple(target, context, {
           ...options,
@@ -353,7 +362,7 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordResponse(planKey, response.status, response.headers, target.provider, Date.now()),
             );
-            if (lastDecision) updateRouterStatus(ctx, shortStatus(lastDecision, quota));
+            updateRouterStatus(ctx, shortStatus(streamDecision, quota));
           },
         });
 
@@ -362,16 +371,16 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordRateLimited(planKey, undefined, undefined, Date.now()),
             );
-            if (lastDecision) updateRouterStatus(ctx, shortStatus(lastDecision, quota));
+            updateRouterStatus(ctx, shortStatus(streamDecision, quota));
           }
 
           stream.push(event);
           if (event.type === "done" && cfg.cacheAware.enabled) {
             // Re-establish the warm lease from realized usage so the next turn can weigh staying vs switching.
-            recordRoutingUsage(routingState, selection.selected, event.message.usage, context);
+            recordRoutingUsage(state.routingState, selection.selected, event.message.usage, context);
           }
           if (event.type === "done" || event.type === "error") {
-            logTerminalEvent(ctx, cfg, lastDecision, event);
+            logTerminalEvent(ctx, cfg, streamDecision, event);
           }
         }
         stream.end();
@@ -384,29 +393,30 @@ export default function modelRouter(pi: ExtensionAPI) {
     return stream;
   }
 
-  async function preselectTurn(ctx: ExtensionContext, context: Context): Promise<void> {
+  async function preselectTurn(state: RouterSessionState, context: Context): Promise<void> {
+    const { ctx, cfg, pool, quota } = state;
     if (pool.all.length === 0) return;
 
-    const quotaPlans = cfg.quota.enabled && !forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
-    const currentClassifier = await classifyCurrentTurnWhenUseful(ctx, context, undefined, quotaPlans);
-    const decision = decide(context, undefined, forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
+    const quotaPlans = cfg.quota.enabled && !state.forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
+    const currentClassifier = await classifyCurrentTurnWhenUseful(state, context, undefined, quotaPlans);
+    const decision = decide(context, undefined, state.forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
     const selectionPool = decision.cls === "model"
       ? pool
       : repriceForTimeOfDay(
-        forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
+        state.forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
         new Date().getHours(),
       );
     const fresh = selectModel(decision, selectionPool, context, undefined, cfg);
     let selection = fresh;
     let cacheReason: CacheReason | undefined;
     const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
-    if (!forcedRoute && decision.cls !== "model" && !configuredPin) {
-      const result = cacheAwareSelect(fresh, routingState, selectionPool, context, cfg);
+    if (!state.forcedRoute && decision.cls !== "model" && !configuredPin) {
+      const result = cacheAwareSelect(fresh, state.routingState, selectionPool, context, cfg);
       selection = result.selection;
       cacheReason = result.cacheReason;
     }
 
-    turnSelection = { key: routingTurnKey(context), decision, selection, cacheReason, pending: true };
+    state.turnSelection = { key: routingTurnKey(context), decision, selection, cacheReason, pending: true };
     syncRouterContextWindow(selection.selected.model.contextWindow);
   }
 
@@ -464,12 +474,13 @@ export default function modelRouter(pi: ExtensionAPI) {
   }
 
   async function classifyCurrentTurnWhenUseful(
-    ctx: ExtensionContext,
+    state: RouterSessionState,
     context: Context,
     options: SimpleStreamOptions | undefined,
     quotaPlans: QuotaPlanLookup,
   ): Promise<ClassificationResult | undefined> {
-    if (forcedRoute || !cfg.classifier.enabled) return undefined;
+    const { ctx, cfg, pool, quota } = state;
+    if (state.forcedRoute || !cfg.classifier.enabled) return undefined;
     if (cfg.classifier.strategy === "local") {
       if (contextHasImageForClassifier(context)) {
         return { mode: "high", reason: "local classifier: image safety fallback" };
@@ -481,8 +492,8 @@ export default function modelRouter(pi: ExtensionAPI) {
           reason: `local classifier: ${result.label.toLowerCase()} (${result.scores[result.label].toFixed(3)})`,
         };
       } catch (error) {
-        if (!localClassifierErrorShown) {
-          localClassifierErrorShown = true;
+        if (!state.localClassifierErrorShown) {
+          state.localClassifierErrorShown = true;
           ctx.ui.notify(`Pi Router: local classifier unavailable; using heuristic (${String(error)})`, "warning");
         }
         return undefined;
@@ -493,27 +504,28 @@ export default function modelRouter(pi: ExtensionAPI) {
       usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
       new Date().getHours(),
     );
-    const fresh = selectModel(heuristicDecision, selectionPool, context, options, ctx, cfg);
-    const draft = cacheAwareSelect(fresh, routingState, selectionPool, context, cfg).selection;
-    const previousSelectionKey = turnSelection && !turnSelection.pending
-      ? modelKey(turnSelection.selection.selected.model)
+    const fresh = selectModel(heuristicDecision, selectionPool, context, options, cfg);
+    const draft = cacheAwareSelect(fresh, state.routingState, selectionPool, context, cfg).selection;
+    const previousSelectionKey = state.turnSelection && !state.turnSelection.pending
+      ? modelKey(state.turnSelection.selection.selected.model)
       : undefined;
-    const previousKey = routingState.lease?.modelKey ?? previousSelectionKey;
+    const previousKey = state.routingState.lease?.modelKey ?? previousSelectionKey;
 
     if (previousKey && modelKey(draft.selected.model) === previousKey) return undefined;
-    return classifyCurrentTurn(ctx, context);
+    return classifyCurrentTurn(state, context);
   }
 
-  async function classifyCurrentTurn(ctx: ExtensionContext, context: Context): Promise<ClassificationResult | undefined> {
+  async function classifyCurrentTurn(state: RouterSessionState, context: Context): Promise<ClassificationResult | undefined> {
+    const { ctx, cfg, pool } = state;
     const turn = userTurnIndex(context);
-    const candidate = selectClassifierModel(repriceForTimeOfDay(pool, new Date().getHours()), cfg, classifierState, turn);
+    const candidate = selectClassifierModel(repriceForTimeOfDay(pool, new Date().getHours()), cfg, state.classifierState, turn);
     if (!candidate) return undefined;
 
     const key = modelKey(candidate.model);
     try {
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(candidate.model);
       if (!auth.ok) {
-        recordClassifierFailure(classifierState, key, turn, cfg);
+        recordClassifierFailure(state.classifierState, key, turn, cfg);
         return undefined;
       }
 
@@ -529,16 +541,41 @@ export default function modelRouter(pi: ExtensionAPI) {
       });
       const parsed = parseClassificationOutput(assistantText(message));
       if (!parsed) {
-        recordClassifierFailure(classifierState, key, turn, cfg);
+        recordClassifierFailure(state.classifierState, key, turn, cfg);
         return undefined;
       }
 
-      recordClassifierSuccess(classifierState, key);
+      recordClassifierSuccess(state.classifierState, key);
       return parsed;
     } catch {
-      recordClassifierFailure(classifierState, key, turn, cfg);
+      recordClassifierFailure(state.classifierState, key, turn, cfg);
       return undefined;
     }
+  }
+
+  function sessionState(ctx: ExtensionContext): RouterSessionState {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const state = sessions.get(sessionId);
+    if (!state) throw new Error(`Pi Router: session state not initialized: ${sessionId}`);
+    return state;
+  }
+
+  function streamSessionState(context: Context, options: SimpleStreamOptions | undefined): RouterSessionState {
+    if (options?.sessionId) {
+      const state = sessions.get(options.sessionId);
+      if (state) return state;
+    }
+
+    const turnKey = routingTurnKey(context);
+    const matching = [...sessions.values()].filter((state) => {
+      const messages = convertToLlm(buildSessionContext(state.ctx.sessionManager.getBranch()).messages);
+      return routingTurnKey({ messages }) === turnKey;
+    });
+    if (matching.length === 1) return matching[0];
+    if (sessions.size === 1) return sessions.values().next().value!;
+
+    const suffix = options?.sessionId ? `: ${options.sessionId}` : "";
+    throw new Error(`Pi Router: no matching session state${suffix}`);
   }
 }
 
