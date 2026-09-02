@@ -18,16 +18,10 @@ function classifier() {
     fileURLToPath(new URL("../models/complexity-classifier", import.meta.url));
   env.allowRemoteModels = false;
   env.allowLocalModels = true;
-  classifierPromise = pipeline("text-classification", modelRoot, { dtype: "q8" })
-    .then((run) => {
-      // The upstream training recipe uses 128 tokens; longer inputs add latency without learned signal.
-      run.tokenizer.model_max_length = 128;
-      return run;
-    })
-    .catch((error) => {
-      classifierPromise = undefined;
-      throw error;
-    });
+  classifierPromise = pipeline("text-classification", modelRoot, { dtype: "q8" }).catch((error) => {
+    classifierPromise = undefined;
+    throw error;
+  });
   return classifierPromise;
 }
 

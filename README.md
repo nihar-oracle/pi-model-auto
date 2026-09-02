@@ -177,8 +177,9 @@ Forced first-turn pins and tool-call continuations do not run another classifica
 On the pinned 1,200-query public
 [`llm-query-complexity-benchmark`](https://huggingface.co/datasets/anasnassar/llm-query-complexity-benchmark)
 test split, the local classifier measured 0.591 macro-F1, 59.6% accuracy, 63.8% High recall, and 4.0%
-severe under-routing on an Apple M1 Pro. Short-query steady-state latency measured 20.1 ms p50 and
-72.0 ms p95; model loading measured 616.6 ms. On LLMRouterBench LiveCodeBench, routing between
+severe under-routing on an Apple M1 Pro. Short-query steady-state latency measured 16.7 ms p50 and
+49.2 ms p95; model loading measured 576.7 ms. The final process RSS delta was 554.7 MiB, with
+143.6 MiB stored on disk. On LLMRouterBench LiveCodeBench, routing between
 DeepSeek V3.1 Terminus and GPT-5 raised accuracy from 67.3% for the heuristic/weak baseline to 76.8%,
 while using GPT-5 for 48.0% of prompts. Long coding-prompt classifier latency measured 81.9 ms p50 and
 182.3 ms p95. These are local measurements, not upstream claims.
