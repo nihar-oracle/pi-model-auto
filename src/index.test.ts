@@ -106,6 +106,10 @@ describe("router context window", () => {
     const { providers, handlers, ctx } = createHarness(target);
 
     await handlers.get("session_start")!({}, ctx);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+      "router",
+      "Auto · first prompt: @low @medium @high @ultra",
+    );
     const inputResult = await handlers.get("input")!({ source: "interactive", text: "test" }, ctx);
 
     expect(inputResult).toEqual({ action: "continue" });
@@ -132,5 +136,9 @@ describe("router context window", () => {
     }
 
     expect(providers.at(-1)?.models?.[0].contextWindow).toBe(272_000);
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      expect.stringMatching(/^↳ gpt-5\.6-sol · high · High/),
+    );
   });
 });

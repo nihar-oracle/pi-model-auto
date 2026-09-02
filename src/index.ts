@@ -152,12 +152,12 @@ export default function modelRouter(pi: ExtensionAPI) {
     const recentModel = mostRecentConcreteModel(ctx);
     if (recentModel) syncRouterContextWindow(recentModel.contextWindow);
 
-    updateRouterStatus(ctx, pool.all.length === 0 ? "🧭 no models" : "🧭 ready");
+    updateRouterStatus(ctx, pool.all.length === 0 ? "No routed models" : readyStatus());
   });
 
   pi.on("model_select", async (event, ctx) => {
     if (isRouterModel(event.model)) {
-      updateRouterStatus(ctx, lastDecision ? shortStatus(lastDecision, quota) : "🧭 ready");
+      updateRouterStatus(ctx, lastDecision ? shortStatus(lastDecision, quota) : readyStatus());
     } else {
       ctx.ui.setStatus("router", undefined);
     }
@@ -708,6 +708,9 @@ function describeRouter(
         .join(" → ");
       return `  ${profile}: ${points || "none"}`;
     }),
+    "overrides:",
+    "  first prompt in a new session: @low <prompt> | @medium <prompt> | @high <prompt> | @ultra <prompt>",
+    "  exact endpoint: @model:provider/model <prompt>",
   ];
 
   if (lastDecision) {
@@ -840,13 +843,17 @@ function looksRateLimited(message: AssistantMessage): boolean {
   return text.includes("429") || text.includes("rate limit") || text.includes("too many requests") || text.includes("quota");
 }
 
+function readyStatus(): string {
+  return "Auto · first prompt: @low @medium @high @ultra";
+}
+
 function shortStatus(decision: LastDecision, quota: QuotaState): string {
   const model = decision.chosen.split("/").at(-1) ?? decision.chosen;
-  const effort = decision.reasoning && decision.reasoning !== "off" ? `@${decision.reasoning}` : "";
+  const effort = decision.reasoning && decision.reasoning !== "off" ? decision.reasoning : "off";
   const mode = decision.capabilityMode
     ? decision.capabilityMode[0].toUpperCase() + decision.capabilityMode.slice(1)
     : `cost:${decision.costTier}`;
-  return `🧭 ${model}${effort} · ${mode}${quotaStatusTag(quota.snapshot(decision.planKey), Date.now())}`;
+  return `↳ ${model} · ${effort} · ${mode}${quotaStatusTag(quota.snapshot(decision.planKey), Date.now())}`;
 }
 
 function quotaStatusTag(state: PlanState | undefined, now: number): string {

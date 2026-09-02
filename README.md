@@ -42,6 +42,8 @@ Check what the router sees:
 /auto
 ```
 
+Before the first prompt, the router status quietly lists the available mode overrides. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` includes the same new-session and exact-endpoint override syntax alongside the detailed routing decision.
+
 Most turns should use automatic routing. At the start of a new conversation, you can pin the initial capability mode:
 
 ```text

@@ -11,6 +11,7 @@
 - Refreshed the bundled Ramp SWE-Bench data against the August 2026 78-task result set, updated all measured resolve-rate, cost, and tool-call values, and added the high-effort DeepSeek V4 Flash result. The full measured table remains available while Ramp's highlighted score-versus-spend wall is tracked separately for routing priority.
 - Replaced the default length/context heuristic with a checksum-pinned, local INT8 ModernBERT complexity classifier. The heuristic remains available with `classifier: "off"`, while `classifier: "llm"` or `classifierModel` retains the bounded provider-backed strategy.
 - Replaced Transformers.js's unused native image dependency with a text-only stub so the local classifier loads in OMP's embedded runtime; image prompts still conservatively route High before classifier inference.
+- Refined the router status into a quiet two-state display: first-turn override hints before routing, then the concrete model, applied thinking level, and capability mode; `/auto` now repeats the override syntax.
 
 ## 0.2.1 - 2026-07-30
 
