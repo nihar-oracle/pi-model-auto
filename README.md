@@ -42,7 +42,7 @@ Check what the router sees:
 /auto
 ```
 
-The router status shows whether routing is automatic or sticky. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra` or `Forced Ultra · ↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` reports the current routing state alongside the detailed routing decision.
+The footer is a routing breadcrumb. `AUTO → gpt-5.6-sol · Ultra · xhigh` identifies the persistent automatic policy and the concrete model selected for the active turn; after completion it becomes `AUTO · last: gpt-5.6-sol · Ultra · xhigh`. Sticky routes use `PIN Ultra`, and inline overrides use `ONCE High` while active. Immediately after `/route auto`, `AUTO · next: dynamic · last: <model>` makes the reset explicit without pretending the next model has already been selected. `/auto` reports the detailed routing decision.
 
 Keep a route across turns with `/route`, then return to automatic routing with `/route auto`:
 

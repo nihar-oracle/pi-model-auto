@@ -120,7 +120,7 @@ describe("router context window", () => {
     await handlers.get("session_start")!({}, ctx);
     expect(ctx.ui.setStatus).toHaveBeenCalledWith(
       "router",
-      "Auto · one turn: @route:<mode|provider/model>",
+      "AUTO · next: dynamic",
     );
     const inputResult = await handlers.get("input")!({ source: "interactive", text: "test" }, ctx);
 
@@ -148,9 +148,13 @@ describe("router context window", () => {
     }
 
     expect(providers.at(-1)?.models?.[0].contextWindow).toBe(272_000);
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+      "router",
+      expect.stringMatching(/^ONCE magi-codex\/gpt-5\.6-sol · High · high/),
+    );
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      expect.stringMatching(/^↳ gpt-5\.6-sol · high · High/),
+      expect.stringMatching(/^AUTO · last: gpt-5\.6-sol · High · high/),
     );
   });
 
@@ -178,7 +182,7 @@ describe("router context window", () => {
 
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      expect.stringMatching(/^↳ gpt-5\.6-sol · high · Ultra/),
+      expect.stringMatching(/^AUTO · last: gpt-5\.6-sol · Ultra · high/),
     );
   });
 
@@ -207,7 +211,7 @@ describe("router context window", () => {
       }
       expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
         "router",
-        expect.stringMatching(/^↳ gpt-5\.6-luna · high · Low/),
+        expect.stringMatching(/^AUTO · last: gpt-5\.6-luna · Low · high/),
       );
     }
   });
@@ -229,7 +233,7 @@ describe("router context window", () => {
     await commands.get("route")!.handler("ultra", ctx);
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      "Forced Ultra · /route auto to clear",
+      "PIN Ultra · next: pinned",
     );
 
     for (const text of ["first sticky turn", "second sticky turn"]) {
@@ -240,16 +244,20 @@ describe("router context window", () => {
       for await (const _event of initialProvider.streamSimple!(routerModel, context)) {
         // Consume the stream so routing finishes.
       }
+      expect(ctx.ui.setStatus).toHaveBeenCalledWith(
+        "router",
+        expect.stringMatching(/^PIN Ultra → gpt-5\.6-sol · high/),
+      );
       expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
         "router",
-        expect.stringMatching(/^Forced Ultra · ↳ gpt-5\.6-sol · high · Ultra/),
+        expect.stringMatching(/^PIN Ultra · last: gpt-5\.6-sol · Ultra · high/),
       );
     }
 
     await commands.get("route")!.handler("auto", ctx);
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      "Auto · one turn: @route:<mode|provider/model>",
+      "AUTO · next: dynamic · last: gpt-5.6-sol",
     );
   });
 
@@ -269,7 +277,7 @@ describe("router context window", () => {
     });
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      "Auto · one turn: @route:<mode|provider/model>",
+      "AUTO · next: dynamic",
     );
   });
 
@@ -385,7 +393,7 @@ describe("router context window", () => {
     )).toBe(false);
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "router",
-      expect.stringMatching(/^↳ gpt-5\.6-sol/),
+      expect.stringMatching(/^AUTO · last: gpt-5\.6-sol/),
     );
   });
 });

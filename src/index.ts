@@ -198,8 +198,8 @@ export default function modelRouter(pi: ExtensionAPI) {
         state.stickyRoute = undefined;
         state.forcedRoute = undefined;
         state.turnSelection = undefined;
-        updateRouterStatus(ctx, readyStatus());
-        ctx.ui.notify("Pi Router: sticky routing disabled; using Auto.", "info");
+        updateRouterStatus(ctx, readyStatus(undefined, state.lastDecision, state.quota));
+        ctx.ui.notify("Pi Router: sticky route cleared; automatic routing restored.", "info");
         return;
       }
 
@@ -211,8 +211,8 @@ export default function modelRouter(pi: ExtensionAPI) {
       state.stickyRoute = route;
       state.forcedRoute = undefined;
       state.turnSelection = undefined;
-      updateRouterStatus(ctx, stickyReadyStatus(route));
-      ctx.ui.notify(`Pi Router: ${stickyRouteLabel(route)} until /route auto.`, "info");
+      updateRouterStatus(ctx, readyStatus(state.stickyRoute, state.lastDecision, state.quota));
+      ctx.ui.notify(`${stickyRouteLabel(route)} until /route auto.`, "info");
     },
   });
 
@@ -295,7 +295,7 @@ export default function modelRouter(pi: ExtensionAPI) {
     const recentModel = mostRecentConcreteModel(ctx);
     if (recentModel) syncRouterContextWindow(recentModel.contextWindow);
 
-    updateRouterStatus(ctx, state.pool.all.length === 0 ? "No routed models" : readyStatus(state.stickyRoute));
+    updateRouterStatus(ctx, state.pool.all.length === 0 ? "No routed models" : readyStatus(state.stickyRoute, state.lastDecision, state.quota));
   });
 
   pi.on("model_select", async (event, ctx) => {
@@ -304,8 +304,8 @@ export default function modelRouter(pi: ExtensionAPI) {
       updateRouterStatus(
         ctx,
         state?.lastDecision
-          ? shortStatus(state.lastDecision, state.quota, state.stickyRoute)
-          : readyStatus(state?.stickyRoute),
+          ? settledStatus(state.lastDecision, state.quota, state.stickyRoute)
+          : readyStatus(state?.stickyRoute, undefined, state?.quota),
       );
     } else {
       ctx.ui.setStatus("router", undefined);
@@ -327,7 +327,7 @@ export default function modelRouter(pi: ExtensionAPI) {
     if (parsed?.auto) {
       state.stickyRoute = undefined;
       state.turnSelection = undefined;
-      updateRouterStatus(ctx, readyStatus());
+      updateRouterStatus(ctx, readyStatus(undefined, state.lastDecision, state.quota));
     }
     state.forcedRoute = parsed ? parsed.route : (initialTurn ? state.cliForcedRoute : undefined);
     const routedText = parsed?.text ?? event.text;
@@ -353,9 +353,12 @@ export default function modelRouter(pi: ExtensionAPI) {
   function streamSimple(routerModel: Model<Api>, context: Context, options?: SimpleStreamOptions) {
     const stream = createAssistantMessageEventStream();
 
+    let activeState: RouterSessionState | undefined;
+
     void (async () => {
       try {
         const state = streamSessionState(context, options);
+        activeState = state;
         const { ctx, cfg, pool, quota } = state;
         if (pool.all.length === 0) {
           throw new Error("Pi Router: no authenticated models. Run /login or configure an API key, then /reload.");
@@ -384,6 +387,7 @@ export default function modelRouter(pi: ExtensionAPI) {
           ? cachedSelection!.decision
           : decide(context, options, requestRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
         const statusRoute = options?.codexCompaction ? undefined : state.stickyRoute;
+        const oneTurnRoute = options?.codexCompaction ? undefined : state.forcedRoute;
         // Re-evaluate time-of-day shadow-price windows once per turn (clock read here, pick reused
         // within the turn), so a window boundary like GLM 14:00–18:00 takes effect without a /reload.
         const selectionPool = decision.cls === "model" || reuseTurnSelection
@@ -449,7 +453,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         };
         state.lastDecision = streamDecision;
 
-        updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
+        updateRouterStatus(ctx, activeStatus(streamDecision, quota, statusRoute, oneTurnRoute));
         logDecision(ctx, cfg, streamDecision);
 
         const inner = aiStreamSimple(target, context, {
@@ -466,7 +470,7 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordResponse(planKey, response.status, response.headers, target.provider, Date.now()),
             );
-            updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
+            updateRouterStatus(ctx, activeStatus(streamDecision, quota, statusRoute, oneTurnRoute));
           },
         });
 
@@ -475,7 +479,7 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordRateLimited(planKey, undefined, undefined, Date.now()),
             );
-            updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
+            updateRouterStatus(ctx, activeStatus(streamDecision, quota, statusRoute, oneTurnRoute));
           }
 
           stream.push(event);
@@ -485,10 +489,20 @@ export default function modelRouter(pi: ExtensionAPI) {
           }
           if (event.type === "done" || event.type === "error") {
             logTerminalEvent(ctx, cfg, streamDecision, event);
+            state.forcedRoute = undefined;
+            updateRouterStatus(ctx, settledStatus(streamDecision, quota, state.stickyRoute));
           }
         }
         stream.end();
+        activeState = undefined;
       } catch (error) {
+        if (activeState) {
+          activeState.forcedRoute = undefined;
+          updateRouterStatus(
+            activeState.ctx,
+            readyStatus(activeState.stickyRoute, activeState.lastDecision, activeState.quota),
+          );
+        }
         stream.push(makeRouterError(routerModel, error));
         stream.end();
       }
@@ -1068,29 +1082,74 @@ function looksRateLimited(message: AssistantMessage): boolean {
   return text.includes("429") || text.includes("rate limit") || text.includes("too many requests") || text.includes("quota");
 }
 
-function readyStatus(stickyRoute?: ForcedRoute): string {
-  return stickyRoute ? stickyReadyStatus(stickyRoute) : "Auto · one turn: @route:<mode|provider/model>";
-}
-
-function stickyReadyStatus(route: ForcedRoute): string {
-  return `${stickyRouteLabel(route)} · /route auto to clear`;
+function readyStatus(
+  stickyRoute?: ForcedRoute,
+  lastDecision?: LastDecision,
+  quota?: QuotaState,
+): string {
+  const policy = stickyRoute ? `${stickyRouteLabel(stickyRoute)} · next: pinned` : "AUTO · next: dynamic";
+  if (!lastDecision) return policy;
+  const quotaTag = quota ? quotaStatusTag(quota.snapshot(lastDecision.planKey), Date.now()) : "";
+  return `${policy} · last: ${selectedModelName(lastDecision)}${quotaTag}`;
 }
 
 function stickyRouteLabel(route: ForcedRoute): string {
+  return routeLabel("PIN", route);
+}
+
+function routeLabel(prefix: "PIN" | "ONCE", route: ForcedRoute): string {
   const target = "mode" in route
     ? route.mode[0].toUpperCase() + route.mode.slice(1)
     : route.model;
-  return `Forced ${target}`;
+  return `${prefix} ${target}`;
 }
 
-function shortStatus(decision: LastDecision, quota: QuotaState, stickyRoute?: ForcedRoute): string {
-  const model = decision.chosen.split("/").at(-1) ?? decision.chosen;
-  const effort = decision.reasoning && decision.reasoning !== "off" ? decision.reasoning : "off";
-  const mode = decision.capabilityMode
+function activeStatus(
+  decision: LastDecision,
+  quota: QuotaState,
+  stickyRoute?: ForcedRoute,
+  oneTurnRoute?: ForcedRoute,
+): string {
+  const model = selectedModelName(decision);
+  const effort = decisionEffort(decision);
+  const mode = decisionMode(decision);
+  const quotaTag = quotaStatusTag(quota.snapshot(decision.planKey), Date.now());
+  if (oneTurnRoute) {
+    const label = routeLabel("ONCE", oneTurnRoute);
+    return "mode" in oneTurnRoute
+      ? `${label} → ${model} · ${effort}${quotaTag}`
+      : `${label} · ${mode} · ${effort}${quotaTag}`;
+  }
+  if (stickyRoute) {
+    const label = stickyRouteLabel(stickyRoute);
+    return "mode" in stickyRoute
+      ? `${label} → ${model} · ${effort}${quotaTag}`
+      : `${label} · ${mode} · ${effort}${quotaTag}`;
+  }
+  return `AUTO → ${model} · ${mode} · ${effort}${quotaTag}`;
+}
+
+function settledStatus(decision: LastDecision, quota: QuotaState, stickyRoute?: ForcedRoute): string {
+  const quotaTag = quotaStatusTag(quota.snapshot(decision.planKey), Date.now());
+  if (stickyRoute && "model" in stickyRoute) {
+    return `${stickyRouteLabel(stickyRoute)} · ${decisionMode(decision)} · ${decisionEffort(decision)}${quotaTag}`;
+  }
+  const policy = stickyRoute ? stickyRouteLabel(stickyRoute) : "AUTO";
+  return `${policy} · last: ${selectedModelName(decision)} · ${decisionMode(decision)} · ${decisionEffort(decision)}${quotaTag}`;
+}
+
+function selectedModelName(decision: LastDecision): string {
+  return decision.chosen.split("/").at(-1) ?? decision.chosen;
+}
+
+function decisionEffort(decision: LastDecision): string {
+  return decision.reasoning && decision.reasoning !== "off" ? decision.reasoning : "off";
+}
+
+function decisionMode(decision: LastDecision): string {
+  return decision.capabilityMode
     ? decision.capabilityMode[0].toUpperCase() + decision.capabilityMode.slice(1)
     : `cost:${decision.costTier}`;
-  const forced = stickyRoute ? `${stickyRouteLabel(stickyRoute)} · ` : "";
-  return `${forced}↳ ${model} · ${effort} · ${mode}${quotaStatusTag(quota.snapshot(decision.planKey), Date.now())}`;
 }
 
 function quotaStatusTag(state: PlanState | undefined, now: number): string {
