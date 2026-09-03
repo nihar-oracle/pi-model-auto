@@ -278,25 +278,34 @@ export default function modelRouter(pi: ExtensionAPI) {
           throw new Error("Pi Router: no authenticated models. Run /login or configure an API key, then /reload.");
         }
 
-        const quotaPlans = cfg.quota.enabled && !state.forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
+        // Compaction is maintenance work, not a task-complexity signal. Its large transcript would
+        // otherwise bias normal classification toward High/Ultra and make summarization needlessly slow.
+        const requestRoute: ForcedRoute | undefined = options?.codexCompaction
+          ? { mode: "medium" }
+          : state.forcedRoute;
+        const quotaPlans = cfg.quota.enabled && !requestRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
         const turnKey = routingTurnKey(context);
         const cachedSelection = state.turnSelection;
-        const preselectedTurn = cachedSelection?.pending === true && cachedSelection.key === turnKey;
+        const preselectedTurn =
+          !options?.codexCompaction && cachedSelection?.pending === true && cachedSelection.key === turnKey;
         const reuseTurnSelection =
           preselectedTurn ||
-          (shouldReuseTurnSelection(context) && cachedSelection?.key === turnKey && cachedSelection.decision.cls !== "model");
-        const currentClassifier = !reuseTurnSelection && !shouldReuseTurnSelection(context)
+          (!options?.codexCompaction &&
+            shouldReuseTurnSelection(context) &&
+            cachedSelection?.key === turnKey &&
+            cachedSelection.decision.cls !== "model");
+        const currentClassifier = !reuseTurnSelection && !options?.codexCompaction && !shouldReuseTurnSelection(context)
           ? await classifyCurrentTurnWhenUseful(state, context, options, quotaPlans)
           : undefined;
         const decision = reuseTurnSelection
           ? cachedSelection!.decision
-          : decide(context, options, state.forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
+          : decide(context, options, requestRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
         // Re-evaluate time-of-day shadow-price windows once per turn (clock read here, pick reused
         // within the turn), so a window boundary like GLM 14:00–18:00 takes effect without a /reload.
         const selectionPool = decision.cls === "model" || reuseTurnSelection
           ? pool
           : repriceForTimeOfDay(
-            state.forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
+            requestRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
             new Date().getHours(),
           );
 
@@ -309,7 +318,7 @@ export default function modelRouter(pi: ExtensionAPI) {
           const fresh = selectModel(decision, selectionPool, context, options, cfg);
           // Explicit model/mode pins are contracts; cache economics may only replace unpinned auto selections.
           const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
-          if (!state.forcedRoute && decision.cls !== "model" && !configuredPin) {
+          if (!requestRoute && decision.cls !== "model" && !configuredPin) {
             const result = cacheAwareSelect(fresh, state.routingState, selectionPool, context, cfg);
             selection = result.selection;
             cacheReason = result.cacheReason;

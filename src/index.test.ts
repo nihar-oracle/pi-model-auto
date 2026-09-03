@@ -34,7 +34,8 @@ function model(provider: string, id: string, contextWindow: number): Model<Api> 
   };
 }
 
-function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: string, sessionId = "parent") {
+function createHarness(target: Model<Api> | Model<Api>[], branch: unknown[] = [], routeFlag?: string, sessionId = "parent") {
+  const targets = Array.isArray(target) ? target : [target];
   const agentDir = mkdtempSync(join(tmpdir(), "pi-model-auto-agent-"));
   temporaryDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -60,8 +61,9 @@ function createHarness(target: Model<Api>, branch: unknown[] = [], routeFlag?: s
     baseUrl: initialProvider.baseUrl!,
   };
   const registry = {
-    getAvailable: () => [target],
-    find: (provider: string, id: string) => provider === target.provider && id === target.id ? target : undefined,
+    getAvailable: () => targets,
+    find: (provider: string, id: string) =>
+      targets.find((candidate) => provider === candidate.provider && id === candidate.id),
     hasConfiguredAuth: () => true,
     getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "test-key" }),
   };
@@ -171,6 +173,36 @@ describe("router context window", () => {
       "router",
       expect.stringMatching(/^↳ gpt-5\.6-sol · high · Ultra/),
     );
+  });
+
+  it("routes manual and automatic compaction through Medium", async () => {
+    const medium = model("openai-codex", "gpt-5.6-terra", 372_000);
+    const ultra = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, initialProvider, routerModel, ctx, agentDir } = createHarness([medium, ultra], [], "ultra");
+    writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({
+      router: {
+        modeModels: {
+          medium: { model: "openai-codex/gpt-5.6-terra", thinking: "high" },
+          ultra: { model: "openai-codex/gpt-5.6-sol", thinking: "xhigh" },
+        },
+      },
+    }));
+    await handlers.get("session_start")!({}, ctx);
+    const context: Context = {
+      messages: [{ role: "user", content: "a very large compaction transcript", timestamp: Date.now() }],
+    };
+
+    for (const trigger of ["manual", "auto"] as const) {
+      for await (const _event of initialProvider.streamSimple!(routerModel, context, {
+        codexCompaction: { trigger, reason: trigger === "manual" ? "user_requested" : "context_limit", phase: "standalone_turn" },
+      })) {
+        // Consume the stream so routing finishes.
+      }
+      expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+        "router",
+        expect.stringMatching(/^↳ gpt-5\.6-terra · high · Medium/),
+      );
+    }
   });
 
   it("accepts a one-turn mode override in the middle of a session", async () => {
