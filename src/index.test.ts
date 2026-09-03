@@ -42,10 +42,12 @@ function createHarness(target: Model<Api> | Model<Api>[], branch: unknown[] = []
   writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({ router: { classifier: "off" } }));
 
   const providers: ProviderConfig[] = [];
+  const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => Promise<void> }>();
   const handlers = new Map<string, Handler>();
   const pi = {
     registerProvider: (_name: string, config: ProviderConfig) => providers.push(config),
-    registerCommand: vi.fn(),
+    registerCommand: (name: string, command: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) =>
+      commands.set(name, command),
     registerFlag: vi.fn(),
     getFlag: (name: string) => name === "route" ? routeFlag : undefined,
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -77,7 +79,7 @@ function createHarness(target: Model<Api> | Model<Api>[], branch: unknown[] = []
     ui: { notify: vi.fn(), setStatus: vi.fn(), addAutocompleteProvider: vi.fn() },
   } as unknown as ExtensionContext;
 
-  return { providers, handlers, initialProvider, routerModel, ctx, agentDir };
+  return { providers, handlers, commands, initialProvider, routerModel, ctx, agentDir };
 }
 
 describe("router context window", () => {
@@ -203,6 +205,67 @@ describe("router context window", () => {
         expect.stringMatching(/^↳ gpt-5\.6-terra · high · Medium/),
       );
     }
+  });
+
+  it("keeps a sticky route across turns and exposes its forced UI state", async () => {
+    const medium = model("openai-codex", "gpt-5.6-terra", 372_000);
+    const ultra = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, commands, initialProvider, routerModel, ctx, agentDir } =
+      createHarness([medium, ultra]);
+    writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({
+      router: {
+        modeModels: {
+          medium: { model: "openai-codex/gpt-5.6-terra", thinking: "high" },
+          ultra: { model: "openai-codex/gpt-5.6-sol", thinking: "xhigh" },
+        },
+      },
+    }));
+    await handlers.get("session_start")!({}, ctx);
+    await commands.get("route")!.handler("ultra", ctx);
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      "Forced Ultra · /route auto to clear",
+    );
+
+    for (const text of ["first sticky turn", "second sticky turn"]) {
+      await handlers.get("input")!({ source: "interactive", text }, ctx);
+      const context: Context = {
+        messages: [{ role: "user", content: text, timestamp: Date.now() }],
+      };
+      for await (const _event of initialProvider.streamSimple!(routerModel, context)) {
+        // Consume the stream so routing finishes.
+      }
+      expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+        "router",
+        expect.stringMatching(/^Forced Ultra · ↳ gpt-5\.6-sol · high · Ultra/),
+      );
+    }
+
+    await commands.get("route")!.handler("auto", ctx);
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      "Auto · one turn: @route:<mode|provider/model>",
+    );
+  });
+
+  it("clears sticky routing with an @route:auto prompt", async () => {
+    const target = model("openai-codex", "gpt-5.6-sol", 372_000);
+    const { handlers, commands, ctx } = createHarness(target);
+    await handlers.get("session_start")!({}, ctx);
+    await commands.get("route")!.handler("ultra", ctx);
+
+    await expect(handlers.get("input")!(
+      { source: "interactive", text: "@route:auto resume automatic routing" },
+      ctx,
+    )).resolves.toEqual({
+      action: "transform",
+      text: "resume automatic routing",
+      images: undefined,
+    });
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "router",
+      "Auto · one turn: @route:<mode|provider/model>",
+    );
   });
 
   it("accepts a one-turn mode override in the middle of a session", async () => {

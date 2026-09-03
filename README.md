@@ -42,7 +42,17 @@ Check what the router sees:
 /auto
 ```
 
-The router status lists the one-turn override syntax before routing. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` repeats the override syntax alongside the detailed routing decision.
+The router status shows whether routing is automatic or sticky. After selection it shows the concrete endpoint, applied thinking level, and capability mode, for example `↳ gpt-5.6-sol · xhigh · Ultra` or `Forced Ultra · ↳ gpt-5.6-sol · xhigh · Ultra`. `/auto` reports the current routing state alongside the detailed routing decision.
+
+Keep a route across turns with `/route`, then return to automatic routing with `/route auto`:
+
+```text
+/route ultra
+/route openai-codex/gpt-5.6-sol
+/route auto
+```
+
+Sticky routing is session-scoped. `@route:auto <prompt>` clears it and routes that prompt automatically.
 
 Most turns should use automatic routing. To override any single turn—including in the middle of a conversation—start that prompt with `@route:`:
 

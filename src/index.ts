@@ -118,6 +118,7 @@ interface RouterSessionState {
   pool: Pool;
   forcedRoute?: ForcedRoute;
   cliForcedRoute?: ForcedRoute;
+  stickyRoute?: ForcedRoute;
   lastDecision?: LastDecision;
   turnSelection?: { key: string; decision: Decision; selection: Selection; cacheReason?: CacheReason; pending?: boolean };
   routingState: RoutingState;
@@ -143,7 +144,47 @@ export default function modelRouter(pi: ExtensionAPI) {
     description: "Show Pi Model Router pool and last decision",
     handler: async (_args, ctx) => {
       const state = sessionState(ctx);
-      ctx.ui.notify(describeRouter(repriceForTimeOfDay(state.pool, new Date().getHours()), state.cfg, state.lastDecision, state.quota), "info");
+      ctx.ui.notify(
+        describeRouter(
+          repriceForTimeOfDay(state.pool, new Date().getHours()),
+          state.cfg,
+          state.lastDecision,
+          state.quota,
+          state.stickyRoute,
+        ),
+        "info",
+      );
+    },
+  });
+
+  pi.registerCommand("route", {
+    description: "Keep routing through a mode or model until /route auto",
+    handler: async (args, ctx) => {
+      const state = sessionState(ctx);
+      const target = args.trim();
+      if (!target) {
+        ctx.ui.notify(`Pi Router: ${state.stickyRoute ? stickyRouteLabel(state.stickyRoute) : "Auto"}. Use /route <mode|provider/model|auto>.`, "info");
+        return;
+      }
+      if (target.toLowerCase() === "auto") {
+        state.stickyRoute = undefined;
+        state.forcedRoute = undefined;
+        state.turnSelection = undefined;
+        updateRouterStatus(ctx, readyStatus());
+        ctx.ui.notify("Pi Router: sticky routing disabled; using Auto.", "info");
+        return;
+      }
+
+      const route = parseRouteHint(target);
+      if (!route || ("model" in route && !state.pool.all.some((item) => modelKey(item.model) === route.model))) {
+        ctx.ui.notify(`Pi Router: invalid or unavailable route: ${target}`, "warning");
+        return;
+      }
+      state.stickyRoute = route;
+      state.forcedRoute = undefined;
+      state.turnSelection = undefined;
+      updateRouterStatus(ctx, stickyReadyStatus(route));
+      ctx.ui.notify(`Pi Router: ${stickyRouteLabel(route)} until /route auto.`, "info");
     },
   });
 
@@ -226,13 +267,18 @@ export default function modelRouter(pi: ExtensionAPI) {
     const recentModel = mostRecentConcreteModel(ctx);
     if (recentModel) syncRouterContextWindow(recentModel.contextWindow);
 
-    updateRouterStatus(ctx, state.pool.all.length === 0 ? "No routed models" : readyStatus());
+    updateRouterStatus(ctx, state.pool.all.length === 0 ? "No routed models" : readyStatus(state.stickyRoute));
   });
 
   pi.on("model_select", async (event, ctx) => {
-    const state = sessions.get(ctx.sessionManager.getSessionId());
+    const state = sessionStateById(ctx.sessionManager.getSessionId());
     if (isRouterModel(event.model)) {
-      updateRouterStatus(ctx, state?.lastDecision ? shortStatus(state.lastDecision, state.quota) : readyStatus());
+      updateRouterStatus(
+        ctx,
+        state?.lastDecision
+          ? shortStatus(state.lastDecision, state.quota, state.stickyRoute)
+          : readyStatus(state?.stickyRoute),
+      );
     } else {
       ctx.ui.setStatus("router", undefined);
     }
@@ -250,13 +296,22 @@ export default function modelRouter(pi: ExtensionAPI) {
 
     const parsed = parseForcedRoute(event.text);
     const initialTurn = isInitialUserTurn(ctx);
-    state.forcedRoute = parsed?.route ?? (initialTurn ? state.cliForcedRoute : undefined);
+    if (parsed?.auto) {
+      state.stickyRoute = undefined;
+      state.turnSelection = undefined;
+      updateRouterStatus(ctx, readyStatus());
+    }
+    state.forcedRoute = parsed ? parsed.route : (initialTurn ? state.cliForcedRoute : undefined);
     const routedText = parsed?.text ?? event.text;
     // Pi checks preflight compaction after input hooks but before `streamSimple`, so the target
     // window must be installed here or a large→small model switch can miss its compact threshold.
     if (isRouterModel(ctx.model) && !event.streamingBehavior) {
       try {
-        await preselectTurn(state, inputRoutingContext(ctx, routedText, event.images));
+        await preselectTurn(
+          state,
+          inputRoutingContext(ctx, routedText, event.images),
+          state.forcedRoute ?? state.stickyRoute,
+        );
       } catch {
         state.turnSelection = undefined;
       }
@@ -282,7 +337,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         // otherwise bias normal classification toward High/Ultra and make summarization needlessly slow.
         const requestRoute: ForcedRoute | undefined = options?.codexCompaction
           ? { mode: "medium" }
-          : state.forcedRoute;
+          : (state.forcedRoute ?? state.stickyRoute);
         const quotaPlans = cfg.quota.enabled && !requestRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
         const turnKey = routingTurnKey(context);
         const cachedSelection = state.turnSelection;
@@ -300,6 +355,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         const decision = reuseTurnSelection
           ? cachedSelection!.decision
           : decide(context, options, requestRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
+        const statusRoute = options?.codexCompaction ? undefined : state.stickyRoute;
         // Re-evaluate time-of-day shadow-price windows once per turn (clock read here, pick reused
         // within the turn), so a window boundary like GLM 14:00–18:00 takes effect without a /reload.
         const selectionPool = decision.cls === "model" || reuseTurnSelection
@@ -365,7 +421,7 @@ export default function modelRouter(pi: ExtensionAPI) {
         };
         state.lastDecision = streamDecision;
 
-        updateRouterStatus(ctx, shortStatus(streamDecision, quota));
+        updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
         logDecision(ctx, cfg, streamDecision);
 
         const inner = aiStreamSimple(target, context, {
@@ -382,7 +438,7 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordResponse(planKey, response.status, response.headers, target.provider, Date.now()),
             );
-            updateRouterStatus(ctx, shortStatus(streamDecision, quota));
+            updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
           },
         });
 
@@ -391,7 +447,7 @@ export default function modelRouter(pi: ExtensionAPI) {
             recordQuotaChange(ctx, cfg, quota, planKey, () =>
               quota.recordRateLimited(planKey, undefined, undefined, Date.now()),
             );
-            updateRouterStatus(ctx, shortStatus(streamDecision, quota));
+            updateRouterStatus(ctx, shortStatus(streamDecision, quota, statusRoute));
           }
 
           stream.push(event);
@@ -413,24 +469,30 @@ export default function modelRouter(pi: ExtensionAPI) {
     return stream;
   }
 
-  async function preselectTurn(state: RouterSessionState, context: Context): Promise<void> {
+  async function preselectTurn(
+    state: RouterSessionState,
+    context: Context,
+    requestRoute: ForcedRoute | undefined,
+  ): Promise<void> {
     const { ctx, cfg, pool, quota } = state;
     if (pool.all.length === 0) return;
 
-    const quotaPlans = cfg.quota.enabled && !state.forcedRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
-    const currentClassifier = await classifyCurrentTurnWhenUseful(state, context, undefined, quotaPlans);
-    const decision = decide(context, undefined, state.forcedRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
+    const quotaPlans = cfg.quota.enabled && !requestRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
+    const currentClassifier = requestRoute
+      ? undefined
+      : await classifyCurrentTurnWhenUseful(state, context, undefined, quotaPlans);
+    const decision = decide(context, undefined, requestRoute, cfg, currentClassifier ? { classify: () => currentClassifier } : undefined);
     const selectionPool = decision.cls === "model"
       ? pool
       : repriceForTimeOfDay(
-        state.forcedRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
+        requestRoute ? pool : usablePoolForQuota(ctx, cfg, pool, quota, Date.now(), quotaPlans),
         new Date().getHours(),
       );
     const fresh = selectModel(decision, selectionPool, context, undefined, cfg);
     let selection = fresh;
     let cacheReason: CacheReason | undefined;
     const configuredPin = decision.cls === "model" ? undefined : cfg.modeModels[decision.cls];
-    if (!state.forcedRoute && decision.cls !== "model" && !configuredPin) {
+    if (!requestRoute && decision.cls !== "model" && !configuredPin) {
       const result = cacheAwareSelect(fresh, state.routingState, selectionPool, context, cfg);
       selection = result.selection;
       cacheReason = result.cacheReason;
@@ -753,11 +815,12 @@ function parseRouteHint(text: string): ForcedRoute | undefined {
   return /^[^\s/]+\/[^\s]+$/.test(normalized) ? { model: normalized } : undefined;
 }
 
-function parseForcedRoute(text: string): { route: ForcedRoute; text: string } | undefined {
+function parseForcedRoute(text: string): { route?: ForcedRoute; auto: boolean; text: string } | undefined {
   const match = text.match(/^@route:([^\s]+)\s+([\s\S]*)$/i);
   if (!match) return undefined;
+  if (match[1].toLowerCase() === "auto") return { auto: true, text: match[2] };
   const route = parseRouteHint(match[1]);
-  return route ? { route, text: match[2] } : undefined;
+  return route ? { route, auto: false, text: match[2] } : undefined;
 }
 
 function isInitialUserTurn(ctx: ExtensionContext): boolean {
@@ -817,6 +880,7 @@ function describeRouter(
   cfg: RouterConfig,
   lastDecision: LastDecision | undefined,
   quota: QuotaState,
+  stickyRoute: ForcedRoute | undefined,
 ): string {
   const lines = [
     "Pi Router",
@@ -824,6 +888,7 @@ function describeRouter(
     `cacheAware: ${cfg.cacheAware.enabled}`,
     `modelFilter: include=[${cfg.modelFilter.include.join(", ") || "*"}] exclude=[${cfg.modelFilter.exclude.join(", ") || "none"}]`,
     `quota: ${cfg.quota.enabled ? "enabled" : "disabled"}`,
+    `routing: ${stickyRoute ? stickyRouteLabel(stickyRoute) : "Auto"}`,
     `costCheapPool: ${pool.cheapPool.map((item) => modelKey(item.model)).join(", ") || "none"}`,
     `frontierPool: ${pool.strongPool.map((item) => `${modelKey(item.model)}(${item.canonicalKey ?? "unknown"}/${item.costTier}/${item.profiles.join("+")})`).join(", ") || "none"}`,
     `costStandardPool: ${pool.standardPool.map((item) => modelKey(item.model)).join(", ") || "none"}`,
@@ -837,8 +902,11 @@ function describeRouter(
       return `  ${profile}: ${points || "none"}`;
     }),
     "overrides:",
+    "  sticky: /route low|medium|high|ultra|provider/model",
+    "  clear sticky: /route auto",
     "  one turn: @route:low|medium|high|ultra <prompt>",
     "  one turn, exact endpoint: @route:provider/model <prompt>",
+    "  clear sticky + auto turn: @route:auto <prompt>",
     "  CLI/print mode: --route ultra|provider/model",
   ];
 
@@ -972,17 +1040,29 @@ function looksRateLimited(message: AssistantMessage): boolean {
   return text.includes("429") || text.includes("rate limit") || text.includes("too many requests") || text.includes("quota");
 }
 
-function readyStatus(): string {
-  return "Auto · one turn: @route:<mode|provider/model>";
+function readyStatus(stickyRoute?: ForcedRoute): string {
+  return stickyRoute ? stickyReadyStatus(stickyRoute) : "Auto · one turn: @route:<mode|provider/model>";
 }
 
-function shortStatus(decision: LastDecision, quota: QuotaState): string {
+function stickyReadyStatus(route: ForcedRoute): string {
+  return `${stickyRouteLabel(route)} · /route auto to clear`;
+}
+
+function stickyRouteLabel(route: ForcedRoute): string {
+  const target = "mode" in route
+    ? route.mode[0].toUpperCase() + route.mode.slice(1)
+    : route.model;
+  return `Forced ${target}`;
+}
+
+function shortStatus(decision: LastDecision, quota: QuotaState, stickyRoute?: ForcedRoute): string {
   const model = decision.chosen.split("/").at(-1) ?? decision.chosen;
   const effort = decision.reasoning && decision.reasoning !== "off" ? decision.reasoning : "off";
   const mode = decision.capabilityMode
     ? decision.capabilityMode[0].toUpperCase() + decision.capabilityMode.slice(1)
     : `cost:${decision.costTier}`;
-  return `↳ ${model} · ${effort} · ${mode}${quotaStatusTag(quota.snapshot(decision.planKey), Date.now())}`;
+  const forced = stickyRoute ? `${stickyRouteLabel(stickyRoute)} · ` : "";
+  return `${forced}↳ ${model} · ${effort} · ${mode}${quotaStatusTag(quota.snapshot(decision.planKey), Date.now())}`;
 }
 
 function quotaStatusTag(state: PlanState | undefined, now: number): string {
