@@ -361,10 +361,10 @@ export default function modelRouter(pi: ExtensionAPI) {
           throw new Error("Pi Router: no authenticated models. Run /login or configure an API key, then /reload.");
         }
 
-        // Compaction is maintenance work, not a task-complexity signal. Its large transcript would
-        // otherwise bias normal classification toward High/Ultra and make summarization needlessly slow.
+        // Compaction is maintenance summarization, not task-complexity work. Its large transcript
+        // would otherwise bias normal classification toward High/Ultra and waste capability.
         const requestRoute: ForcedRoute | undefined = options?.codexCompaction
-          ? { mode: "medium" }
+          ? { mode: "low" }
           : (state.forcedRoute ?? state.stickyRoute);
         const quotaPlans = cfg.quota.enabled && !requestRoute ? await resolveQuotaPlans(ctx, pool) : new Map();
         const turnKey = routingTurnKey(context);
