@@ -159,6 +159,34 @@ export default function modelRouter(pi: ExtensionAPI) {
 
   pi.registerCommand("route", {
     description: "Keep routing through a mode or model until /route auto",
+    getArgumentCompletions(argumentPrefix) {
+      if (argumentPrefix.includes(" ")) return null;
+      const normalized = argumentPrefix.trim().toLowerCase();
+      const items: Array<{ value: string; label: string; description: string }> = [
+        { value: "auto", label: "auto", description: "Clear sticky routing" },
+        ...(["low", "medium", "high", "ultra"] as const).map((mode) => ({
+          value: mode,
+          label: mode,
+          description: `Keep routing through ${mode[0].toUpperCase() + mode.slice(1)}`,
+        })),
+      ];
+      const seen = new Set<string>();
+      for (const state of sessions.values()) {
+        for (const candidate of state.pool.all) {
+          const key = modelKey(candidate.model);
+          const normalizedKey = key.toLowerCase();
+          if (seen.has(normalizedKey)) continue;
+          seen.add(normalizedKey);
+          items.push({
+            value: key,
+            label: key,
+            description: "Keep routing through this exact model",
+          });
+        }
+      }
+      const filtered = items.filter((item) => item.label.toLowerCase().startsWith(normalized));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args, ctx) => {
       const state = sessionState(ctx);
       const target = args.trim();

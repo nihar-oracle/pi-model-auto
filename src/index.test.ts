@@ -42,12 +42,17 @@ function createHarness(target: Model<Api> | Model<Api>[], branch: unknown[] = []
   writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({ router: { classifier: "off" } }));
 
   const providers: ProviderConfig[] = [];
-  const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => Promise<void> }>();
+  const commands = new Map<string, {
+    getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null;
+    handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+  }>();
   const handlers = new Map<string, Handler>();
   const pi = {
     registerProvider: (_name: string, config: ProviderConfig) => providers.push(config),
-    registerCommand: (name: string, command: { handler: (args: string, ctx: ExtensionContext) => Promise<void> }) =>
-      commands.set(name, command),
+    registerCommand: (name: string, command: {
+      getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string; description?: string }> | null;
+      handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+    }) => commands.set(name, command),
     registerFlag: vi.fn(),
     getFlag: (name: string) => name === "route" ? routeFlag : undefined,
     on: (event: string, handler: Handler) => handlers.set(event, handler),
@@ -296,7 +301,7 @@ describe("router context window", () => {
 
   it("completes one-turn routes only while the router model is selected", async () => {
     const target = model("openai-codex", "gpt-5.6-sol", 372_000);
-    const { handlers, ctx, agentDir } = createHarness(target);
+    const { handlers, commands, ctx, agentDir } = createHarness(target);
     writeFileSync(join(agentDir, "model-router.json"), JSON.stringify({
       router: {
         classifier: "off",
@@ -331,6 +336,21 @@ describe("router context window", () => {
         description: "Exact model · one turn",
       }],
     });
+    expect(commands.get("route")!.getArgumentCompletions!("u")).toEqual([{
+      value: "ultra",
+      label: "ultra",
+      description: "Keep routing through Ultra",
+    }]);
+    expect(commands.get("route")!.getArgumentCompletions!("openai")).toEqual([{
+      value: "openai-codex/gpt-5.6-sol",
+      label: "openai-codex/gpt-5.6-sol",
+      description: "Keep routing through this exact model",
+    }]);
+    expect(commands.get("route")!.getArgumentCompletions!("a")).toEqual([{
+      value: "auto",
+      label: "auto",
+      description: "Clear sticky routing",
+    }]);
     expect(provider.shouldTriggerFileCompletion(["@route:u"], 0, 8)).toBe(false);
 
     ctx.model = target;

@@ -16,7 +16,7 @@
 - Added the CLI-safe `--route ultra|provider/model` flag for print mode, where Pi consumes leading `@...` tokens as file references before extensions receive the prompt.
 - Isolated router context, selections, classifier state, quota state, and footer decisions with a composite OMP session-ID/session-file key. Provider requests resolve through the session ID, while ambiguous nested shutdown events retain state because OMP does not identify their target.
 - Routed both manual and automatic compaction through the Medium capability tier, preventing large maintenance transcripts from escalating summarization to High or Ultra.
-- Added session-scoped sticky routing through `/route <mode|provider/model>`, with `/route auto` and `@route:auto <prompt>` restoring automatic selection. The status line and `/auto` output now identify forced routing explicitly.
+- Added session-scoped sticky routing through `/route <mode|provider/model>`, with argument completion for `auto`, modes, and admitted exact models. `/route auto` and `@route:auto <prompt>` restore automatic selection, while the status line and `/auto` output identify forced routing explicitly.
 
 ## 0.2.1 - 2026-07-30
 

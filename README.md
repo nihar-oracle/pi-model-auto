@@ -52,7 +52,7 @@ Keep a route across turns with `/route`, then return to automatic routing with `
 /route auto
 ```
 
-Sticky routing is session-scoped. `@route:auto <prompt>` clears it and routes that prompt automatically.
+Sticky routing is session-scoped. `/route` argument completion lists `auto`, all capability modes, and exact models currently admitted to the router pool. `@route:auto <prompt>` clears sticky routing and routes that prompt automatically.
 
 Most turns should use automatic routing. To override any single turn—including in the middle of a conversation—start that prompt with `@route:`:
 
